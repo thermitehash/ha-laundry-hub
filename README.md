@@ -5,7 +5,7 @@ tracking and laundry sorting lights. Tap a tagged garment on a station and Laund
 works out where it goes next. The matching wash bin or dry zone lights up on a WLED strip,
 and the station's LED confirms the tap.
 
-> **Status: v0.2.0, unverified on hardware.** Everything is built and tested against fakes
+> **Status: v0.2.1, unverified on hardware.** Everything is built and tested against fakes
 > (see [`docs/build-report.md`](docs/build-report.md)). Stations, readers, tags and WLED
 > have not been tested on real hardware yet.
 
@@ -55,6 +55,9 @@ Everything is configured in the UI.
 | Wardrobe catalog       | off     | Photos, purchase details and AI descriptions per garment (see below) |
 | AI Task entity         | –       | Used to describe garments from their photos (optional) |
 | Follow HA theme colour | off     | Use your HA theme's primary colour instead of Laundry teal |
+
+With Wardrobe on, **Configure** opens a menu: **Main settings** (the table above) and
+**Purchase emails** (see below).
 
 **Wash bins and dry types** are config subentries under **Settings → Devices & services →
 Laundry Hub**. Use *Add wash bin* / *Add dry type*, or **Reconfigure** an existing one to
@@ -114,6 +117,51 @@ everything works exactly as in v0.1.2.
 - **Filters**: every detail above is a Closet filter with counts, plus **Needs photo** and **Needs
   review**. Search also matches details, for example "navy long sleeve".
 
+## Purchase emails (optional)
+
+Order emails from stores you choose become **purchase cards** (item, store, date, price,
+product link, photo) that you can match to garments. Needs Wardrobe on and an AI Task entity.
+
+1. **Configure → Purchase emails.** Enter your email address and an **app password**. For
+   Gmail, turn on 2-Step Verification, then create one under Google Account → Security →
+   [App passwords](https://myaccount.google.com/apppasswords). Your normal password won't
+   work. Other providers: choose **Generic IMAP** and enter the server, port and folder.
+   The login is tested before anything is saved.
+2. **Pick your stores.** Nothing is pre-selected. Each store shows how many matching emails
+   arrived in the last 90 days, and stores with emails are listed first. Add any other
+   store's sender domain under *Custom sender domains* (subdomains match too). The built-in
+   list (Amazon, Target, Walmart, Kohl's, Gap Inc. brands, Nordstrom, Macy's, H&M, Zara,
+   Uniqlo, Lululemon, Nike and more, 37 in all) is best effort.
+3. **Options:** check every N minutes (default 30, at least 15), how far back the first check
+   looks (none, 30, **90** or 365 days), clothing only (default on: an Amazon order for
+   batteries is skipped), and archive unmatched cards after N days (default 60).
+
+Afterwards the menu shows the status ("connected (5 stores) · last check 12 min ago · 3 new
+cards") with **Edit stores**, **Change password**, **Check now** and **Disconnect**. Disconnect
+deletes the stored address and password and asks whether to keep or delete existing cards.
+
+**Using cards:**
+- **Add:** after the tag, Laundry Hub asks *Is this from a recent order?* with a scrolling
+  row of cards. Tapping one fills in the name, brand, size, purchase details and photo (the
+  photo is copied, so dismissing the card later never deletes it). *None of these* carries
+  on as normal. Nothing is ever matched automatically.
+- **Closet → Purchases:** each card offers *Match to garment* (search for the garment),
+  *Dismiss*, and *Not clothing* (dismisses it and remembers that product for that store).
+- **Garment detail:** a matched garment shows "From your Old Navy order, Nov 22" with a link
+  to the product.
+- Shipping and delivery emails for an order you already have update its card.
+
+> **Privacy:** Laundry Hub only reads mail, and only from the stores you opt in to. It opens
+> the folder read-only and never sends, deletes, moves or flags messages. It reads the
+> headers of matching messages first and fetches the text of opted-in senders only (no
+> attachments). That text is sent to the AI provider behind your AI Task entity to find the
+> items. Only the card fields are kept, plus the sender's domain and Message-ID to avoid
+> duplicates. Email text, subjects, addresses and the AI's raw answer are never stored or
+> logged, and diagnostics never show them or the password.
+
+If Google stops accepting the password (for example, you revoked the app password), a repair
+appears under **Settings → Repairs**; it asks for a new app password and tests it.
+
 > **Privacy:** when a garment is described, its photos and details are sent to the AI
 > provider behind the AI Task entity you chose. Nothing is sent unless Wardrobe is on and an
 > AI Task entity is set. Product-link imports fetch only the page you paste and its images.
@@ -127,6 +175,7 @@ everything works exactly as in v0.1.2.
 | `sensor.laundry_hub_drying` | garments drying | `dry_types` (name → count) |
 | `sensor.laundry_hub_missing` | missing garments | `garments` (up to 50), `truncated` |
 | `sensor.laundry_hub_unknown_tags` | unknown tags not yet enrolled | `last_unknown` |
+| `sensor.laundry_hub_unmatched_purchases` | purchase cards waiting to be matched | – |
 | `sensor.laundry_hub_bin_<slug>` | garments in that wash bin (one per bin, created and removed with the bin) | – |
 | `event.laundry_hub_tap` | event types `in_wash`, `drying`, `put_away`, `unknown` | garment, uid, station, mode, zone, repeat |
 
@@ -142,6 +191,7 @@ everything works exactly as in v0.1.2.
 | `laundry_hub.flash_zone` | `zone` (wash bin or dry type, name or id) |
 | `laundry_hub.import_product_url` | `url`, `garment`?, `apply`? (returns the details found; with `apply` saves them). Needs Wardrobe on |
 | `laundry_hub.describe_garment` | `garment` (describes it with the AI Task entity). Needs Wardrobe on |
+| `laundry_hub.check_purchase_emails` | – (checks the connected mailbox now; returns counts of new and updated cards) |
 
 Wash bins and dry types accept a name (case-insensitive) or a subentry id. A garment can
 have several tags (replacement tags), and a tag belongs to at most one garment.
@@ -172,9 +222,13 @@ actions:
 
 ## Data and privacy
 
-The catalog is stored locally in `/config/.storage/laundry_hub` (format v3): versioned, written
-atomically and debounced. Photos live in `/config/laundry_hub/photos/`. Diagnostics redact names,
-owners, notes, tag UIDs, photos, purchase details and notify targets.
+The catalog is stored locally in `/config/.storage/laundry_hub` (format v3.2): versioned, written
+atomically and debounced. Purchase cards are kept there too. Photos (garments and cards) live in
+`/config/laundry_hub/photos/`. Diagnostics redact names, owners, notes, tag UIDs, photos,
+purchase details, notify targets, the email address, the password and custom sender domains.
+
+**Going back to v0.2.0:** no restore is needed. v0.2.0 reads the v3.2 file and ignores
+purchase cards.
 
 **Going back to v0.1.2:** v0.2 converts the catalog to a new format and keeps the old one as
 `/config/.storage/laundry_hub.v2.backup`. To roll back: stop Home Assistant, install v0.1.2,
@@ -187,6 +241,11 @@ Changes made under v0.2 are not in the backup.
   log says `Feedback action esphome.<name>_feedback not available` if the device is offline.
 - **Taps ignored**: check the log for `Ignoring tap`. A bad UID, an unknown `station_id`, or a
   tap from a device other than the configured one is logged and dropped.
+- **Purchase emails: "Google rejected the password"**: use an app password, not your normal
+  password, and check that 2-Step Verification is on.
+- **Purchase emails: no cards**: check that the store is ticked in *Edit stores* and that
+  its emails come from a domain in the list (add it under *Custom sender domains* if not).
+  *Check now* shows the counts.
 - **Light does not flash**: the zone needs a light entity, and the entity must be available.
   Use *Test light* on the Status page.
 
@@ -196,6 +255,8 @@ Changes made under v0.2 are not in the backup.
   power-on behaviour) is untested.
 - One flash at a time across all zones (last tap wins), by design.
 - The missing sensor refreshes hourly (and on every change).
+- Purchase emails: the store list is best effort, and extraction quality depends on your AI
+  Task provider. Links are only kept if they appear exactly in the email.
 
 ## Removal
 

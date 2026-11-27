@@ -5,6 +5,12 @@ JSON-LD ``Product`` data, then Open Graph / product meta tags, then Twitter
 cards. Every host (page, redirect targets, images) passes an SSRF guard: after
 DNS resolution, private, loopback, link-local, multicast, reserved and
 unspecified addresses are refused, as are ``localhost`` and ``.local`` names.
+
+DNS rebinding: each request is pinned to the addresses that passed the guard.
+The request runs on a one-off connector whose resolver only knows that host
+and those addresses, so aiohttp never resolves the name a second time. The
+URL keeps its hostname, so the Host header, SNI and certificate check are
+unchanged. Every redirect hop is checked and pinned again.
 """
 
 from __future__ import annotations
@@ -21,8 +27,9 @@ from typing import Any
 from urllib.parse import urljoin, urlsplit
 
 import aiohttp
+from aiohttp.abc import AbstractResolver, ResolveResult
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.util.ssl import client_context
 
 from .const import (
     IMPORT_MAX_HTML,
@@ -99,8 +106,8 @@ async def _resolve(hass: HomeAssistant, host: str, port: int) -> list[str]:
     return [str(info[4][0]) for info in infos]
 
 
-async def check_url(hass: HomeAssistant, url: str) -> str:
-    """Return the URL if it is a public http(s) URL, else raise ImportFailed."""
+async def resolve_checked(hass: HomeAssistant, url: str) -> tuple[str, list[str]]:
+    """Check a URL; return (host, addresses that passed) or raise ImportFailed."""
     try:
         parts = urlsplit(url.strip())
     except ValueError as err:
@@ -125,7 +132,57 @@ async def check_url(hass: HomeAssistant, url: str) -> str:
         addresses = [host]
     if not addresses or not all(_ip_allowed(a) for a in addresses):
         raise ImportFailed(NOT_ALLOWED, "import_not_allowed")
+    return host, list(dict.fromkeys(addresses))
+
+
+async def check_url(hass: HomeAssistant, url: str) -> str:
+    """Return the URL if it is a public http(s) URL, else raise ImportFailed."""
+    await resolve_checked(hass, url)
     return url.strip()
+
+
+class PinnedResolver(AbstractResolver):
+    """Resolver that only answers for one host, with pre-checked addresses."""
+
+    def __init__(self, host: str, addresses: list[str]) -> None:
+        """Initialize."""
+        self.host = host
+        self.addresses = addresses
+
+    async def resolve(
+        self, host: str, port: int = 0, family: socket.AddressFamily = socket.AF_INET
+    ) -> list[ResolveResult]:
+        """Return the pinned addresses; any other host is refused."""
+        if host.rstrip(".").lower() != self.host:
+            raise OSError(f"{host} is not the checked host")
+        results: list[ResolveResult] = []
+        for address in self.addresses:
+            ip = ipaddress.ip_address(address.split("%", 1)[0])
+            results.append(
+                {
+                    "hostname": host,
+                    "host": str(ip),
+                    "port": port,
+                    "family": socket.AF_INET6 if ip.version == 6 else socket.AF_INET,
+                    "proto": 0,
+                    "flags": socket.AI_NUMERICHOST,
+                }
+            )
+        return results
+
+    async def close(self) -> None:
+        """Nothing to release."""
+
+
+def _open_session(hass: HomeAssistant, host: str, addresses: list[str]) -> Any:
+    """A one-off session pinned to the checked addresses (patched in tests)."""
+    connector = aiohttp.TCPConnector(
+        resolver=PinnedResolver(host, addresses),
+        ssl=client_context(),
+        use_dns_cache=False,
+        limit=2,
+    )
+    return aiohttp.ClientSession(connector=connector)
 
 
 # --- fetching -----------------------------------------------------------------
@@ -134,12 +191,15 @@ async def check_url(hass: HomeAssistant, url: str) -> str:
 async def _get(
     hass: HomeAssistant, url: str, *, accept: str, max_bytes: int
 ) -> tuple[str, str, bytes]:
-    """GET with manual, re-checked redirects. Returns (final url, type, body)."""
-    session = async_get_clientsession(hass)
+    """GET with manual, re-checked and re-pinned redirects.
+
+    Returns (final url, content type, body).
+    """
     headers = {"User-Agent": IMPORT_USER_AGENT, "Accept": accept}
     current = url
     for _ in range(IMPORT_MAX_REDIRECTS + 1):
-        await check_url(hass, current)
+        host, addresses = await resolve_checked(hass, current)
+        session = _open_session(hass, host, addresses)
         try:
             async with asyncio.timeout(IMPORT_TIMEOUT):
                 async with session.get(
@@ -162,7 +222,15 @@ async def _get(
             raise ImportFailed(TIMEOUT, "import_timeout") from err
         except aiohttp.ClientError as err:
             raise ImportFailed(UNREACHABLE, "import_unreachable") from err
+        finally:
+            await _close(session)
     raise ImportFailed(UNREACHABLE, "import_unreachable")
+
+
+async def _close(session: Any) -> None:
+    close = getattr(session, "close", None)
+    if close is not None and not getattr(session, "_laundry_shared", False):
+        await close()
 
 
 async def fetch_image(hass: HomeAssistant, url: str) -> bytes:

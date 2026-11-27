@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from typing import Any
+from unittest.mock import patch
 
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import device_registry as dr
@@ -30,6 +31,33 @@ from custom_components.laundry_hub.hub import LaundryHub
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations: None) -> None:
     """Enable custom integrations in every test."""
+
+
+@pytest.fixture(autouse=True)
+def _shared_import_session(
+    request: pytest.FixtureRequest,
+) -> Generator[None]:
+    """Route pinned import fetches through HA's (mockable) shared session.
+
+    The real one-off pinned session is tested on its own (marker
+    ``pinned_session``); everywhere else ``aioclient_mock`` should see requests.
+    """
+    if request.node.get_closest_marker("pinned_session"):
+        yield
+        return
+    from homeassistant.helpers.aiohttp_client import (  # noqa: PLC0415
+        async_get_clientsession,
+    )
+
+    from custom_components.laundry_hub import importer  # noqa: PLC0415
+
+    def shared(hass: HomeAssistant, host: str, addresses: list[str]) -> Any:
+        session = async_get_clientsession(hass)
+        session._laundry_shared = True  # type: ignore[attr-defined]  # noqa: SLF001
+        return session
+
+    with patch.object(importer, "_open_session", shared):
+        yield
 
 
 @pytest.fixture(autouse=True)

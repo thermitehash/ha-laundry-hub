@@ -14,8 +14,9 @@ from homeassistant.config_entries import (
     SubentryFlowResult,
 )
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import selector
+from homeassistant.util import dt as dt_util
 import probatio as vol
 
 from .const import (
@@ -30,20 +31,41 @@ from .const import (
     CONF_NAME,
     CONF_NOTIFY_TARGET,
     CONF_ORDER,
+    CONF_PURCHASE_ARCHIVE_DAYS,
+    CONF_PURCHASE_BACKFILL,
+    CONF_PURCHASE_CLOTHING_ONLY,
+    CONF_PURCHASE_CUSTOM,
+    CONF_PURCHASE_EMAIL,
+    CONF_PURCHASE_INTERVAL,
+    CONF_PURCHASE_STORES,
     CONF_STATION_DEVICES,
     CONF_WARDROBE_ENABLED,
     DEFAULT_FEEDBACK_TIMEOUT,
     DEFAULT_FLASH_DURATION,
     DEFAULT_MISSING_AFTER,
+    DEFAULT_PURCHASE_ARCHIVE_DAYS,
+    DEFAULT_PURCHASE_BACKFILL,
+    DEFAULT_PURCHASE_INTERVAL,
     DOMAIN,
     MAX_NAME_LEN,
+    MIN_PURCHASE_INTERVAL,
     NAME,
+    PURCHASE_BACKFILL_CHOICES,
+    PURCHASE_COUNT_DAYS,
     SEED_DRY_TYPES,
     SEED_WASH_BINS,
     STATIONS,
     SUBENTRY_DRY_TYPE,
     SUBENTRY_WASH_BIN,
 )
+from .mailbox import (
+    PROVIDER_GENERIC,
+    PROVIDER_GMAIL,
+    MailboxError,
+    account_from_data,
+    test_login,
+)
+from .stores import CATALOG, StoreInfo, parse_domains
 
 if TYPE_CHECKING:
     from .hub import LaundryHub
@@ -243,23 +265,469 @@ class LaundryHubConfigFlow(ConfigFlow, domain=DOMAIN):
         }
 
 
+APP_PASSWORD_URL = "https://myaccount.google.com/apppasswords"
+DISCONNECT_KEEP = "keep"
+DISCONNECT_DELETE = "delete"
+
+
+def account_schema(defaults: dict[str, Any]) -> vol.Schema:
+    """Step A: email address, app password, provider."""
+    return vol.Schema(
+        {
+            vol.Required("email", default=defaults.get("email", "")): (
+                selector.TextSelector(
+                    selector.TextSelectorConfig(
+                        type=selector.TextSelectorType.EMAIL, autocomplete="username"
+                    )
+                )
+            ),
+            vol.Required("password"): selector.TextSelector(
+                selector.TextSelectorConfig(
+                    type=selector.TextSelectorType.PASSWORD,
+                    autocomplete="current-password",
+                )
+            ),
+            vol.Required(
+                "provider", default=defaults.get("provider", PROVIDER_GMAIL)
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[PROVIDER_GMAIL, PROVIDER_GENERIC],
+                    translation_key="email_provider",
+                    mode=selector.SelectSelectorMode.LIST,
+                )
+            ),
+        }
+    )
+
+
+def server_schema(defaults: dict[str, Any]) -> vol.Schema:
+    """Generic IMAP: host, port, folder."""
+    return vol.Schema(
+        {
+            vol.Required("host", default=defaults.get("host", "")): (
+                selector.TextSelector()
+            ),
+            vol.Required("port", default=int(defaults.get("port", 993))): (
+                selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1, max=65535, step=1, mode=selector.NumberSelectorMode.BOX
+                    )
+                )
+            ),
+            vol.Required("folder", default=defaults.get("folder", "INBOX")): (
+                selector.TextSelector()
+            ),
+        }
+    )
+
+
+def account_data(user_input: dict[str, Any], server: dict[str, Any]) -> dict[str, Any]:
+    """What is stored in entry.data (same shape as core IMAP: plain password)."""
+    data: dict[str, Any] = {
+        "email": str(user_input["email"]).strip(),
+        "password": str(user_input["password"]),
+        "provider": user_input.get("provider", PROVIDER_GMAIL),
+    }
+    if data["provider"] == PROVIDER_GENERIC:
+        data["host"] = str(server.get("host", "")).strip()
+        data["port"] = int(server.get("port", 993))
+        data["folder"] = str(server.get("folder", "INBOX")).strip() or "INBOX"
+    return data
+
+
+async def async_validate_account(data: dict[str, Any]) -> str | None:
+    """Log in and open the folder read-only. Returns an error key or None."""
+    account = account_from_data(data)
+    if account is None or (
+        data.get("provider") == PROVIDER_GENERIC and not data.get("host")
+    ):
+        return "cannot_connect"
+    try:
+        await test_login(account)
+    except MailboxError as err:
+        return err.key
+    return None
+
+
 class LaundryHubOptionsFlow(OptionsFlow):
-    """Edit the main settings."""
+    """Edit the main settings and the purchase-email connection."""
+
+    def __init__(self) -> None:
+        """Initialize."""
+        self._account: dict[str, Any] | None = None
+        self._pending: dict[str, Any] = {}
+        self._changing_password = False
+
+    @property
+    def _current(self) -> dict[str, Any]:
+        return {**self.config_entry.data, **self.config_entry.options}
+
+    @property
+    def _hub(self) -> LaundryHub | None:
+        return getattr(self.config_entry, "runtime_data", None)
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Manage options."""
+        """Settings form; with Wardrobe on, a menu that adds Purchase emails."""
+        if not self._current.get(CONF_WARDROBE_ENABLED):
+            return await self._settings_form("init", user_input)
+        if self.config_entry.data.get(CONF_PURCHASE_EMAIL):
+            options = [
+                "settings",
+                "email_stores",
+                "email_account",
+                "email_options",
+                "email_check",
+                "email_disconnect",
+            ]
+        else:
+            options = ["settings", "email_account"]
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=options,
+            description_placeholders={"status": self._status_text()},
+        )
+
+    def _status_text(self) -> str:
+        hub = self._hub
+        if not self.config_entry.data.get(CONF_PURCHASE_EMAIL):
+            return "not connected"
+        stores = len(self._current.get(CONF_PURCHASE_STORES) or []) + len(
+            self._current.get(CONF_PURCHASE_CUSTOM) or []
+        )
+        parts = [f"connected ({stores} stores)"]
+        if hub is not None:
+            status = hub.purchases.status()
+            if status["last_check"]:
+                checked = dt_util.parse_datetime(status["last_check"])
+                if checked is not None:
+                    minutes = int((dt_util.utcnow() - checked).total_seconds() // 60)
+                    parts.append(f"last check {minutes} min ago")
+            else:
+                parts.append("not checked yet")
+            if status["last_error"]:
+                parts.append(f"last error: {status['last_error']}")
+            parts.append(f"{status['new_cards']} new cards")
+        return " · ".join(parts)
+
+    async def async_step_settings(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Main settings (from the menu)."""
+        return await self._settings_form("settings", user_input)
+
+    async def _settings_form(
+        self, step_id: str, user_input: dict[str, Any] | None
+    ) -> ConfigFlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
             options, errors = validate_settings(self.hass, user_input)
             if not errors:
-                return self.async_create_entry(data=options)
-        current = {**self.config_entry.data, **self.config_entry.options}
+                return self.async_create_entry(
+                    data={**self._purchase_options(), **options}
+                )
         return self.async_show_form(
-            step_id="init",
-            data_schema=settings_schema(current),
+            step_id=step_id,
+            data_schema=settings_schema(self._current),
             errors=errors,
+        )
+
+    def _purchase_options(self) -> dict[str, Any]:
+        """Purchase-email options currently stored (kept by other steps)."""
+        keys = (
+            CONF_PURCHASE_STORES,
+            CONF_PURCHASE_CUSTOM,
+            CONF_PURCHASE_INTERVAL,
+            CONF_PURCHASE_BACKFILL,
+            CONF_PURCHASE_CLOTHING_ONLY,
+            CONF_PURCHASE_ARCHIVE_DAYS,
+        )
+        return {
+            k: self.config_entry.options[k]
+            for k in keys
+            if k in self.config_entry.options
+        }
+
+    # --- Step A: account ---------------------------------------------------
+
+    async def async_step_email_account(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Account: address + app password; the login is tested before saving."""
+        errors: dict[str, str] = {}
+        stored = self.config_entry.data.get(CONF_PURCHASE_EMAIL) or {}
+        self._changing_password = bool(stored)
+        if not self._current.get(CONF_AI_TASK_ENTITY):
+            errors["base"] = "no_ai_entity"
+        elif user_input is not None:
+            if user_input.get("provider") == PROVIDER_GENERIC:
+                self._pending = dict(user_input)
+                return await self.async_step_email_server()
+            data = account_data(user_input, {})
+            error = await async_validate_account(data)
+            if error is None:
+                return await self._account_ok(data)
+            errors["base"] = error
+        return self.async_show_form(
+            step_id="email_account",
+            data_schema=account_schema(user_input or stored),
+            errors=errors,
+            description_placeholders={"app_password_url": APP_PASSWORD_URL},
+        )
+
+    async def async_step_email_server(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Generic IMAP: server, port and folder."""
+        errors: dict[str, str] = {}
+        stored = self.config_entry.data.get(CONF_PURCHASE_EMAIL) or {}
+        if user_input is not None:
+            data = account_data(self._pending, user_input)
+            error = await async_validate_account(data)
+            if error is None:
+                return await self._account_ok(data)
+            errors["base"] = error
+        return self.async_show_form(
+            step_id="email_server",
+            data_schema=server_schema(user_input or stored),
+            errors=errors,
+        )
+
+    async def _account_ok(self, data: dict[str, Any]) -> ConfigFlowResult:
+        self._account = data
+        if self._changing_password:
+            self._save_account(data)
+            return self.async_create_entry(data=dict(self.config_entry.options))
+        return await self.async_step_email_stores()
+
+    def _save_account(self, data: dict[str, Any] | None) -> None:
+        new = dict(self.config_entry.data)
+        if data is None:
+            new.pop(CONF_PURCHASE_EMAIL, None)
+        else:
+            new[CONF_PURCHASE_EMAIL] = data
+        self.hass.config_entries.async_update_entry(self.config_entry, data=new)
+
+    # --- Step B: stores ----------------------------------------------------
+
+    async def _store_counts(self) -> dict[str, int] | None:
+        from .purchases import async_count_store_emails  # noqa: PLC0415
+
+        account = account_from_data(
+            self._account or self.config_entry.data.get(CONF_PURCHASE_EMAIL)
+        )
+        if account is None:
+            return None
+        try:
+            return await async_count_store_emails(account, PURCHASE_COUNT_DAYS)
+        except MailboxError:
+            return None
+
+    async def async_step_email_stores(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Opt in to stores (none preselected) and custom sender domains."""
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            stores = [k for k in user_input.get(CONF_PURCHASE_STORES, []) if k]
+            custom, invalid = parse_domains(user_input.get(CONF_PURCHASE_CUSTOM, ""))
+            if invalid:
+                errors[CONF_PURCHASE_CUSTOM] = "invalid_domain"
+            elif not stores and not custom:
+                errors["base"] = "no_stores"
+            else:
+                self._pending = {
+                    CONF_PURCHASE_STORES: stores,
+                    CONF_PURCHASE_CUSTOM: custom,
+                }
+                if self._account is None:  # editing stores only
+                    return self.async_create_entry(
+                        data={**self.config_entry.options, **self._pending}
+                    )
+                return await self.async_step_email_options()
+        counts = await self._store_counts()
+        labelled = sorted(
+            CATALOG,
+            key=lambda s: (0 if (counts or {}).get(s.key) else 1, s.name.lower()),
+        )
+
+        def label(store: StoreInfo) -> str:
+            if counts is None:
+                return store.name
+            n = counts.get(store.key, 0)
+            return f"{store.name} — {n} email{'s' if n != 1 else ''}"
+
+        current = self._current
+        chosen = (
+            user_input.get(CONF_PURCHASE_STORES)
+            if user_input
+            else current.get(CONF_PURCHASE_STORES)
+        ) or []
+        custom_text = (
+            user_input.get(CONF_PURCHASE_CUSTOM)
+            if user_input
+            else ", ".join(current.get(CONF_PURCHASE_CUSTOM) or [])
+        ) or ""
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_PURCHASE_STORES, default=list(chosen)): (
+                    selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                selector.SelectOptionDict(value=s.key, label=label(s))
+                                for s in labelled
+                            ],
+                            multiple=True,
+                            mode=selector.SelectSelectorMode.LIST,
+                        )
+                    )
+                ),
+                vol.Optional(
+                    CONF_PURCHASE_CUSTOM, description={"suggested_value": custom_text}
+                ): selector.TextSelector(),
+            }
+        )
+        return self.async_show_form(
+            step_id="email_stores",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={
+                "count_note": (
+                    f"Counts are emails from the last {PURCHASE_COUNT_DAYS} days."
+                    if counts is not None
+                    else "Couldn't count emails right now."
+                )
+            },
+        )
+
+    # --- Step C: options ---------------------------------------------------
+
+    async def async_step_email_options(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """How often to check, backfill, clothing only, auto-archive."""
+        if user_input is not None:
+            options = {
+                **self.config_entry.options,
+                **self._pending,
+                CONF_PURCHASE_INTERVAL: max(
+                    MIN_PURCHASE_INTERVAL, int(user_input[CONF_PURCHASE_INTERVAL])
+                ),
+                CONF_PURCHASE_BACKFILL: int(user_input[CONF_PURCHASE_BACKFILL]),
+                CONF_PURCHASE_CLOTHING_ONLY: bool(
+                    user_input[CONF_PURCHASE_CLOTHING_ONLY]
+                ),
+                CONF_PURCHASE_ARCHIVE_DAYS: int(user_input[CONF_PURCHASE_ARCHIVE_DAYS]),
+            }
+            if self._account is not None:
+                self._save_account(self._account)
+            return self.async_create_entry(data=options)
+        current = self._current
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_PURCHASE_INTERVAL,
+                    default=int(
+                        current.get(CONF_PURCHASE_INTERVAL, DEFAULT_PURCHASE_INTERVAL)
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=MIN_PURCHASE_INTERVAL,
+                        max=1440,
+                        step=1,
+                        unit_of_measurement="min",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+                vol.Required(
+                    CONF_PURCHASE_BACKFILL,
+                    default=str(
+                        current.get(CONF_PURCHASE_BACKFILL, DEFAULT_PURCHASE_BACKFILL)
+                    ),
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[str(d) for d in PURCHASE_BACKFILL_CHOICES],
+                        translation_key="email_backfill",
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Required(
+                    CONF_PURCHASE_CLOTHING_ONLY,
+                    default=bool(current.get(CONF_PURCHASE_CLOTHING_ONLY, True)),
+                ): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_PURCHASE_ARCHIVE_DAYS,
+                    default=int(
+                        current.get(
+                            CONF_PURCHASE_ARCHIVE_DAYS, DEFAULT_PURCHASE_ARCHIVE_DAYS
+                        )
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=365,
+                        step=1,
+                        unit_of_measurement="d",
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
+            }
+        )
+        return self.async_show_form(step_id="email_options", data_schema=schema)
+
+    # --- check now / disconnect --------------------------------------------
+
+    async def async_step_email_check(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Check purchase emails now."""
+        hub = self._hub
+        if hub is None:
+            return self.async_abort(reason="not_loaded")
+        try:
+            summary = await hub.purchases.async_check(manual=True)
+        except HomeAssistantError as err:
+            return self.async_abort(
+                reason="check_failed", description_placeholders={"error": str(err)}
+            )
+        return self.async_abort(
+            reason="check_done",
+            description_placeholders={
+                "new": str(summary.get("new_cards", 0)),
+                "updated": str(summary.get("updated_cards", 0)),
+            },
+        )
+
+    async def async_step_email_disconnect(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Delete the stored credentials; keep or delete the existing cards."""
+        hub = self._hub
+        if user_input is not None:
+            if hub is not None:
+                if user_input.get("cards") == DISCONNECT_DELETE:
+                    await hub.purchases.async_delete_all()
+                hub.purchases.reset_state()
+            self._save_account(None)
+            return self.async_create_entry(data=dict(self.config_entry.options))
+        cards = len(hub.purchases.cards) if hub is not None else 0
+        return self.async_show_form(
+            step_id="email_disconnect",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("cards", default=DISCONNECT_KEEP): (
+                        selector.SelectSelector(
+                            selector.SelectSelectorConfig(
+                                options=[DISCONNECT_KEEP, DISCONNECT_DELETE],
+                                translation_key="email_disconnect_cards",
+                                mode=selector.SelectSelectorMode.LIST,
+                            )
+                        )
+                    )
+                }
+            ),
+            description_placeholders={"cards": str(cards)},
         )
 
 

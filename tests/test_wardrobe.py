@@ -15,6 +15,7 @@ from custom_components.laundry_hub.const import (
     DOMAIN,
     PHOTO_UPLOAD_MAX_BYTES,
     TAP_EVENT,
+    VERSION,
 )
 from custom_components.laundry_hub.hub import LaundryHub
 from custom_components.laundry_hub.models import Garment
@@ -491,7 +492,7 @@ async def test_station_health_owner_settings_recent_taps(
         "body_profile": None,
         "schedule": None,
     }
-    assert data["version"] == "0.2.0"
+    assert data["version"] == VERSION
     assert data["station_health"][0]["station"] == "laundry"
 
 

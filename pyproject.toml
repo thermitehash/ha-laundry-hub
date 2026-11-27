@@ -1,6 +1,6 @@
 [project]
 name = "ha-laundry-hub"
-version = "0.2.0"
+version = "0.2.1"
 requires-python = ">=3.13"
 
 [tool.pytest.ini_options]
@@ -8,6 +8,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 filterwarnings = ["ignore::DeprecationWarning"]
+markers = ["pinned_session: use the real DNS-pinned import session"]
 
 [tool.coverage.run]
 source = ["custom_components/laundry_hub"]
@@ -49,6 +50,10 @@ source_paths = ["custom_components/laundry_hub/statemachine.py"]
 also_copy = ["custom_components", "tests"]
 pytest_add_cli_args_test_selection = ["tests/test_statemachine.py"]
 pytest_add_cli_args = ["-p", "no:cacheprovider", "-q"]
+
+[[tool.mypy.overrides]]
+module = "aioimaplib.*"
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "homeassistant.*"

@@ -1,0 +1,27 @@
+From: Old Navy <orders@email.oldnavy.com>
+To: shopper@example.com
+Subject: Your order is confirmed
+Date: Sun, 22 Nov 2026 15:00:00 +0000
+Message-ID: <on-1@oldnavy.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============2927167158611978472=="
+
+--===============2927167158611978472==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Plain text version of your order.
+
+--===============2927167158611978472==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Order number: ON-99812</p><p>Order date: 2026-11-22</p>
+<div><img src=3D"https://oldnavy.gap.com/webcontent/jeans.jpg"><b>High-Waiste=
+d Wow Jeans</b> Black, 8 Tall, $44.99
+<a href=3D"https://oldnavy.gap.com/browse/product.do?pid=3D123">View item</a>=
+</div></body></html>
+
+--===============2927167158611978472==--

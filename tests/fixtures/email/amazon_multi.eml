@@ -1,0 +1,73 @@
+From: Amazon.com <auto-confirm@amazon.com>
+To: shopper@example.com
+Subject: Your Amazon.com order #112-7654321-1234567
+Date: Fri, 20 Nov 2026 15:00:00 +0000
+Message-ID: <amazon-1@amazon.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============0660440091419509266=="
+
+--===============0660440091419509266==
+Content-Type: multipart/alternative;
+ boundary="===============7510498915435409228=="
+
+--===============7510498915435409228==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Plain text version of your order.
+
+--===============7510498915435409228==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><head><style>.x{color:red}</style></head><body>
+<h1>Thanks for your order!</h1><p>Order #112-7654321-1234567 &middot; Placed =
+on November 20, 2026</p>
+<table>
+<tr><td><a href=3D"https://www.amazon.com/dp/B0CARDIGAN?ref=3Dx&amp;th=3D1"><=
+img src=3D"https://m.media-amazon.com/images/I/cardigan.jpg" alt=3D"Cardigan"=
+ width=3D"120"></a></td>
+<td><a href=3D"https://www.amazon.com/dp/B0CARDIGAN?ref=3Dx&amp;th=3D1">Women=
+'s Rib-Knit Cardigan, Navy</a><br>Size: M &middot; Qty: 1<br>$34.99</td></tr>
+<tr><td><img src=3D"https://m.media-amazon.com/images/I/socks.jpg" alt=3D"Soc=
+ks"></td>
+<td>Wool Hiking Socks (3 pairs), Grey<br>Size: L &middot; Qty: 2<br>$19.50</t=
+d></tr>
+<tr><td><img src=3D"https://m.media-amazon.com/images/I/batteries.jpg" alt=3D=
+"Batteries"></td>
+<td>AA Batteries, 24 pack<br>Qty: 1<br>$15.99</td></tr>
+</table><img src=3D"https://www.amazon.com/gp/r.html/open.gif" width=3D"1" he=
+ight=3D"1">
+</body></html>
+
+--===============7510498915435409228==--
+
+--===============0660440091419509266==
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="invoice.pdf"
+MIME-Version: 1.0
+
+JVBERi0xLjQgZmFrZSBpbnZvaWNlICVQREYtMS40IGZha2UgaW52b2ljZSAlUERGLTEuNCBmYWtl
+IGludm9pY2UgJVBERi0xLjQgZmFrZSBpbnZvaWNlICVQREYtMS40IGZha2UgaW52b2ljZSAlUERG
+LTEuNCBmYWtlIGludm9pY2UgJVBERi0xLjQgZmFrZSBpbnZvaWNlICVQREYtMS40IGZha2UgaW52
+b2ljZSAlUERGLTEuNCBmYWtlIGludm9pY2UgJVBERi0xLjQgZmFrZSBpbnZvaWNlICVQREYtMS40
+IGZha2UgaW52b2ljZSAlUERGLTEuNCBmYWtlIGludm9pY2UgJVBERi0xLjQgZmFrZSBpbnZvaWNl
+ICVQREYtMS40IGZha2UgaW52b2ljZSAlUERGLTEuNCBmYWtlIGludm9pY2UgJVBERi0xLjQgZmFr
+ZSBpbnZvaWNlICVQREYtMS40IGZha2UgaW52b2ljZSAlUERGLTEuNCBmYWtlIGludm9pY2UgJVBE
+Ri0xLjQgZmFrZSBpbnZvaWNlICVQREYtMS40IGZha2UgaW52b2ljZSAlUERGLTEuNCBmYWtlIGlu
+dm9pY2UgJVBERi0xLjQgZmFrZSBpbnZvaWNlICVQREYtMS40IGZha2UgaW52b2ljZSAlUERGLTEu
+NCBmYWtlIGludm9pY2UgJVBERi0xLjQgZmFrZSBpbnZvaWNlICVQREYtMS40IGZha2UgaW52b2lj
+ZSAlUERGLTEuNCBmYWtlIGludm9pY2UgJVBERi0xLjQgZmFrZSBpbnZvaWNlICVQREYtMS40IGZh
+a2UgaW52b2ljZSAlUERGLTEuNCBmYWtlIGludm9pY2UgJVBERi0xLjQgZmFrZSBpbnZvaWNlICVQ
+REYtMS40IGZha2UgaW52b2ljZSAlUERGLTEuNCBmYWtlIGludm9pY2UgJVBERi0xLjQgZmFrZSBp
+bnZvaWNlICVQREYtMS40IGZha2UgaW52b2ljZSAlUERGLTEuNCBmYWtlIGludm9pY2UgJVBERi0x
+LjQgZmFrZSBpbnZvaWNlICVQREYtMS40IGZha2UgaW52b2ljZSAlUERGLTEuNCBmYWtlIGludm9p
+Y2UgJVBERi0xLjQgZmFrZSBpbnZvaWNlICVQREYtMS40IGZha2UgaW52b2ljZSAlUERGLTEuNCBm
+YWtlIGludm9pY2UgJVBERi0xLjQgZmFrZSBpbnZvaWNlICVQREYtMS40IGZha2UgaW52b2ljZSAl
+UERGLTEuNCBmYWtlIGludm9pY2UgJVBERi0xLjQgZmFrZSBpbnZvaWNlICVQREYtMS40IGZha2Ug
+aW52b2ljZSAlUERGLTEuNCBmYWtlIGludm9pY2UgJVBERi0xLjQgZmFrZSBpbnZvaWNlICVQREYt
+MS40IGZha2UgaW52b2ljZSA=
+
+--===============0660440091419509266==--

@@ -113,3 +113,58 @@ export async function downscaleIfHuge(file, maxBytes = 9.5 * 1024 * 1024) {
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
   return blob ? new File([blob], "photo.jpg", { type: "image/jpeg" }) : file;
 }
+
+// iPhones save HEIC/HEIF, which the server (Pillow) can't read. Convert it to
+// JPEG in the browser; Safari can decode it, most other browsers can't.
+export const HEIC_UNSUPPORTED =
+  "This photo format isn't supported — change your iPhone camera setting to Most Compatible, or take the photo from the Add screen.";
+
+export const isHeic = (file) =>
+  /^image\/hei[cf](-sequence)?$/i.test(file?.type || "") || /\.(heic|heif)$/i.test(file?.name || "");
+
+export async function heicToJpeg(file, maxEdge = 4000) {
+  if (typeof createImageBitmap !== "function") throw new Error(HEIC_UNSUPPORTED);
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch (_err) {
+    throw new Error(HEIC_UNSUPPORTED);
+  }
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
+  if (!blob) throw new Error(HEIC_UNSUPPORTED);
+  const base = String(file.name || "photo").replace(/\.[^.]*$/, "") || "photo";
+  return new File([blob], `${base}.jpg`, { type: "image/jpeg" });
+}
+
+// Everything the browser does to a photo before upload.
+export async function prepareUpload(file) {
+  if (isHeic(file)) return downscaleIfHuge(await heicToJpeg(file));
+  return downscaleIfHuge(file);
+}
+
+// --- purchase cards (v0.2.1) ------------------------------------------------------
+
+export const shortDate = (iso) => {
+  if (!iso) return "";
+  const d = new Date(`${String(iso).slice(0, 10)}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+};
+
+export const unmatchedCards = (data) => (data.purchases?.cards || []).filter((c) => c.status === "new");
+
+// One purchase card: photo, name, store · date · price.
+export function purchaseCard(card, { act = "", attrs = "", pressed = null } = {}) {
+  const thumb = card.photo_urls && card.photo_urls[0] ? card.photo_urls[0].thumb : null;
+  const meta = [card.store, shortDate(card.order_date), money(card.unit_price, card.currency)].filter(Boolean).join(" · ");
+  const tag = act ? "button" : "div";
+  return `<${tag} ${act ? `type="button" data-act="${act}"` : ""} class="pcard" data-card="${esc(card.id)}" ${attrs} ${pressed === null ? "" : `aria-pressed="${pressed}"`}>
+    <div class="pmedia">${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : `<span aria-hidden="true">${esc(initials(card.name))}</span>`}</div>
+    <div class="pbody"><span class="name">${esc(card.name)}</span><span class="meta">${esc(meta)}</span>
+      ${card.size || card.color ? `<span class="meta">${esc([card.color, card.size].filter(Boolean).join(" · "))}</span>` : ""}</div></${tag}>`;
+}

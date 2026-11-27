@@ -64,6 +64,7 @@ from .const import (
 from .lights import FlashController
 from .models import Garment, InvalidUid, Zone, garment_problems, normalize_uid
 from .photos import PhotoError, decode_photo
+from .purchases import PurchaseInbox, rank_cards
 from .statemachine import Decision, InvalidTap, TapInput, decide, is_missing
 from .store import Catalog, CatalogError
 from .wardrobe import Wardrobe
@@ -141,6 +142,7 @@ class LaundryHub:
         self._notified: dict[str, datetime] = {}
         self.zone_snapshot: dict[str, ConfigSubentry] = dict(entry.subentries)
         self.wardrobe = Wardrobe(self)
+        self.purchases = PurchaseInbox(self)
 
     # --- settings ------------------------------------------------------
 
@@ -218,12 +220,14 @@ class LaundryHub:
         self._unsubs.append(
             async_track_time_interval(self.hass, self._refresh_missing, MISSING_REFRESH)
         )
+        await self.purchases.async_setup()
 
     async def async_unload(self) -> None:
         """Stop listeners, turn off lights and flush storage."""
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
+        await self.purchases.async_unload()
         await self.flash.async_stop()
         await self.catalog.async_flush()
 
@@ -907,6 +911,17 @@ class LaundryHub:
             },
             "follow_ha_theme": bool(self.options.get(CONF_FOLLOW_HA_THEME, False)),
             "taxonomy": taxonomy.vocabulary() if self.wardrobe.enabled else None,
+            "purchases": (
+                {
+                    **self.purchases.status(),
+                    "cards": [
+                        self.purchases.view(c)
+                        for c in rank_cards(self.purchases.unmatched(), set(), None)
+                    ],
+                }
+                if self.wardrobe.enabled
+                else None
+            ),
         }
 
     def station_health(self) -> list[dict[str, Any]]:

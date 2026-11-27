@@ -97,7 +97,110 @@ async def ws_data(
             {"name": name, "full": sign(name), "thumb": sign(thumb_name(name))}
             for name in garment.get("photos", [])
         ]
+    for card in (data.get("purchases") or {}).get("cards", []):
+        _sign_card(card, sign)
     return data
+
+
+def _sign_card(card: dict[str, Any], sign: Callable[[str], str]) -> dict[str, Any]:
+    card["photo_urls"] = [
+        {"name": name, "full": sign(name), "thumb": sign(thumb_name(name))}
+        for name in card.get("photos") or []
+    ]
+    return card
+
+
+def _signer(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection
+) -> Callable[[str], str]:
+    ttl = timedelta(hours=PHOTO_URL_TTL_HOURS)
+    return lambda name: async_sign_path(
+        hass, f"{PHOTOS_URL}/{name}", ttl, refresh_token_id=connection.refresh_token_id
+    )
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/purchases/suggest",
+        vol.Optional("owner"): _opt_str,
+        vol.Optional("wash_bin"): _opt_str,
+    }
+)
+@websocket_api.async_response
+@_with_hub
+async def ws_purchases_suggest(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Unmatched purchase cards, ranked for the Add flow."""
+    hub.wardrobe.require()
+    sign = _signer(hass, connection)
+    cards = hub.purchases.suggest(msg.get("owner"), msg.get("wash_bin"))
+    return {"cards": [_sign_card(hub.purchases.view(c), sign) for c in cards]}
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/purchases/match",
+        vol.Required("card_id"): _str,
+        vol.Required("garment_id"): _str,
+    }
+)
+@websocket_api.async_response
+@_with_hub
+async def ws_purchases_match(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Fill a garment from a purchase card (copies photos)."""
+    garment = hub.resolve_garment(msg["garment_id"])
+    await hub.purchases.async_match(msg["card_id"], garment)
+    return hub.garment_view(garment)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/purchases/dismiss",
+        vol.Required("card_id"): _str,
+        vol.Optional("not_clothing", default=False): bool,
+    }
+)
+@websocket_api.async_response
+@_with_hub
+async def ws_purchases_dismiss(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Dismiss a card ("Not clothing" also remembers the product for that store)."""
+    hub.wardrobe.require()
+    card = await hub.purchases.async_dismiss(
+        msg["card_id"], not_clothing=msg["not_clothing"]
+    )
+    return hub.purchases.view(card)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/purchases/check"})
+@websocket_api.async_response
+@_with_hub
+async def ws_purchases_check(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Check purchase emails now."""
+    hub.wardrobe.require()
+    return await hub.purchases.async_check(manual=True)
 
 
 @websocket_api.require_admin
@@ -655,5 +758,9 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_import_url,
         ws_import_apply,
         ws_owner_update,
+        ws_purchases_suggest,
+        ws_purchases_match,
+        ws_purchases_dismiss,
+        ws_purchases_check,
     ):
         websocket_api.async_register_command(hass, handler)

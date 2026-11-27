@@ -1,10 +1,17 @@
-"""Expose garment photos to AI Task as media-source attachments.
+"""Expose garment photos to AI Task as media-source attachments, hidden.
 
-Not browsable: it only resolves ``media-source://laundry_hub/<garment>/<file>``
-for a photo that belongs to that garment, so AI Task can read the local file.
+AI Task only accepts attachments as media-source IDs that resolve to local
+files. A ``media_source.py`` platform would make "Laundry Hub" appear at the
+root of HA's media browser, so this module is deliberately *not* a platform.
+Instead the source is registered directly in media_source's lazy platform
+cache at setup: ``media-source://laundry_hub/<garment>/<file>`` resolves (only
+for a photo that belongs to that garment), but the root listing, which only
+lists integrations that ship a ``media_source.py``, never shows it.
 """
 
 from __future__ import annotations
+
+import logging
 
 from homeassistant.components.media_player import BrowseError
 from homeassistant.components.media_source import (
@@ -19,10 +26,31 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN, NAME, PHOTOS_URL
 from .photos import photo_path
 
+_LOGGER = logging.getLogger(__name__)
 
-async def async_get_media_source(hass: HomeAssistant) -> LaundryHubMediaSource:
-    """Set up the garment photo media source."""
-    return LaundryHubMediaSource(hass)
+
+def async_register_hidden_source(hass: HomeAssistant) -> bool:
+    """Make our IDs resolvable without listing us in the media browser.
+
+    Returns False (and AI descriptions can't attach photos) if media_source
+    isn't loaded or its internals changed; never raises.
+    """
+    try:
+        from homeassistant.components.media_source.const import (  # noqa: PLC0415
+            DATA_MEDIA_SOURCE_PLATFORMS,
+        )
+    except ImportError:  # pragma: no cover - media_source always ships
+        return False
+    platforms = hass.data.get(DATA_MEDIA_SOURCE_PLATFORMS)
+    processed = getattr(platforms, "_processed", None)
+    if not isinstance(processed, dict):
+        _LOGGER.warning(
+            "Media Source isn't loaded; AI descriptions can't attach garment photos"
+        )
+        return False
+    if not isinstance(processed.get(DOMAIN), LaundryHubMediaSource):
+        processed[DOMAIN] = LaundryHubMediaSource(hass)
+    return True
 
 
 class LaundryHubMediaSource(MediaSource):

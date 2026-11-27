@@ -1,0 +1,27 @@
+From: Target <orders@oe.target.com>
+To: shopper@example.com
+Subject: Thanks for your order
+Date: Wed, 25 Nov 2026 15:00:00 +0000
+Message-ID: <tgt-1@target.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============0256203093326944034=="
+
+--===============0256203093326944034==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Plain text version of your order.
+
+--===============0256203093326944034==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Order #9012345678</p>
+<p><img src=3D"https://target.scene7.com/is/image/tee.jpg"> Women's Short Sle=
+eve T-Shirt - Universal Thread White XS $8.00</p>
+<p><img src=3D"https://target.scene7.com/is/image/lamp.jpg"> Desk Lamp - Room=
+ Essentials $12.00</p></body></html>
+
+--===============0256203093326944034==--

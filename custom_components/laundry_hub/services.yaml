@@ -133,3 +133,4 @@ describe_garment:
       required: true
       selector:
         text:
+check_purchase_emails:

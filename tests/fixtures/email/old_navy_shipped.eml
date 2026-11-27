@@ -1,0 +1,25 @@
+From: Old Navy <shipping@email.oldnavy.com>
+To: shopper@example.com
+Subject: Your order has shipped!
+Date: Tue, 24 Nov 2026 15:00:00 +0000
+Message-ID: <on-2@oldnavy.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============1174963297142257629=="
+
+--===============1174963297142257629==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Plain text version of your order.
+
+--===============1174963297142257629==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Good news! Order ON-99812 is on its way.</p>
+<div><b>High-Waisted Wow Jeans</b> <img src=3D"https://oldnavy.gap.com/webcon=
+tent/jeans-large.jpg"></div></body></html>
+
+--===============1174963297142257629==--

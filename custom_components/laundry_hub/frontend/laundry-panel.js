@@ -24,7 +24,7 @@ class LaundryHubPanel extends HTMLElement {
       sheet: null,
       menu: false,
       editing: null,
-      filters: { q: "", owner: [], location: [], bin: [], needsPhoto: false, needsReview: false, archived: false, tax: {} },
+      filters: { q: "", owner: [], location: [], bin: [], needsPhoto: false, needsReview: false, archived: false, purchases: false, tax: {} },
       select: { on: false, ids: new Set() },
       add: { step: 1, uid: "", manual: false, form: {}, garmentId: null, preview: null, busy: false, seenAt: null },
       toast: null,
@@ -168,7 +168,13 @@ class LaundryHubPanel extends HTMLElement {
     const list = Array.from(files || []);
     let last = null;
     for (const original of list) {
-      const file = await this.mods.lib.downscaleIfHuge(original);
+      let file;
+      try {
+        file = await this.mods.lib.prepareUpload(original);
+      } catch (err) {
+        this.toast(err.message || "Upload failed", true);
+        continue;
+      }
       const form = new FormData();
       form.append("garment_id", garmentId);
       form.append("file", file, file.name || "photo.jpg");

@@ -12,6 +12,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .const import DOMAIN
 from .hub import LaundryHub
+from .media import async_register_hidden_source
 from .panel import async_register_panel, async_unregister_panel
 from .services import async_setup_services
 from .websocket import async_setup_websocket
@@ -38,6 +39,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: LaundryHubConfigEntry) -
     entry.runtime_data = hub
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await async_register_panel(hass)
+    if "media_source" in hass.config.components:
+        async_register_hidden_source(hass)
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     return True
 

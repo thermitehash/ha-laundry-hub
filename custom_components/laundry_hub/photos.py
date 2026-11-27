@@ -171,3 +171,21 @@ def ensure_thumbnail(directory: Path, filename: str) -> bool:
         return False
     write_photo(directory, thumb.name, processed.thumb)
     return True
+
+
+def copy_photo(directory: Path, source: str, target: str) -> bool:
+    """Copy a stored photo and its thumbnail to a new name (executor only).
+
+    Returns False if the source is gone. The source is never changed, so
+    the copy and the original can be deleted independently.
+    """
+    if not (_SAFE_NAME.match(source) and _SAFE_NAME.match(target)):
+        return False
+    src = directory / source
+    if not src.is_file():
+        return False
+    write_photo(directory, target, src.read_bytes())
+    thumb = directory / thumb_name(source)
+    if thumb.is_file():
+        write_photo(directory, thumb_name(target), thumb.read_bytes())
+    return True

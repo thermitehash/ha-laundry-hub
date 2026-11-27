@@ -115,6 +115,7 @@ function wardrobeSection(ctx, g) {
     <div class="card stack"><div class="row"><strong style="flex:1">Purchase &amp; fit</strong>
         ${editing === "purchase" ? "" : `<button type="button" class="link" data-act="editPurchase">Edit</button>`}</div>
       ${editing === "purchase" ? ctx.mods.add.purchaseForm(ctx, g, "savePurchase") : `
+        ${p.source === "email" && p.store ? `<div class="origin">${lib.ICON.sparkle}<span>From your ${lib.esc(p.store)} order${p.purchased_on ? `, ${lib.esc(lib.shortDate(p.purchased_on))}` : ""}${p.product_url ? ` · <a href="${lib.esc(p.product_url)}" target="_blank" rel="noopener noreferrer">View product</a>` : ""}</span></div>` : ""}
         <div class="kv"><span>Bought</span><span>${lib.esc([p.store, p.purchased_on, lib.money(p.price, p.currency)].filter(Boolean).join(" · ") || "—")}</span></div>
         <div class="kv"><span>Brand</span><span>${lib.esc(g.brand || "—")}</span></div>
         <div class="kv"><span>Size</span><span>${lib.esc(g.size ? [g.size.label, g.size.system, g.size.brand_size_note].filter(Boolean).join(" · ") : "—")}</span></div>

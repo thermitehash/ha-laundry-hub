@@ -704,9 +704,9 @@ async def test_wardrobe_details_bulk_and_review(
 async def test_media_source_resolves_only_garment_photos(hass: HomeAssistant) -> None:
     from homeassistant.components.media_source import MediaSourceItem, Unresolvable
 
-    from custom_components.laundry_hub.media_source import async_get_media_source
+    from custom_components.laundry_hub.media import LaundryHubMediaSource
 
-    source = await async_get_media_source(hass)
+    source = LaundryHubMediaSource(hass)
 
     def item(identifier: str) -> MediaSourceItem:
         return MediaSourceItem(hass, DOMAIN, identifier, None)
@@ -728,6 +728,43 @@ async def test_media_source_resolves_only_garment_photos(hass: HomeAssistant) ->
 
     with pytest.raises(BrowseError):
         await source.async_browse_media(item(""))
+
+
+async def test_media_browser_root_hides_laundry_hub(hass: HomeAssistant) -> None:
+    """Browsing the media root never lists Laundry Hub, yet AI attachments resolve."""
+    from homeassistant.components import media_source
+    from homeassistant.setup import async_setup_component
+
+    media = Path(hass.config.config_dir, "media")
+    media.mkdir()
+    hass.config.media_dirs = {"local": str(media)}
+    assert await async_setup_component(hass, "media_source", {})
+    hub: LaundryHub = await setup_entry(hass, {"wardrobe_enabled": True})
+    garment = hub.enroll(uid="11223344", name="A")
+    name = await hub.wardrobe.async_add_photo(garment, jpeg())
+    sources = await media_source.models._async_get_media_sources(hass)  # noqa: SLF001
+    assert DOMAIN not in sources  # the root lists exactly these
+    root = await media_source.async_browse_media(hass, None)
+    titles = [child.title for child in root.children or []]
+    ids = [child.media_content_id for child in root.children or []]
+    assert "Laundry Hub" not in titles
+    assert not any(DOMAIN in i for i in ids)
+    play = await media_source.async_resolve_media(
+        hass, f"media-source://{DOMAIN}/{garment.id}/{name}", None
+    )
+    assert play.path is not None and play.path.name == name
+    # Browsing our id directly is refused too.
+    from homeassistant.components.media_player import BrowseError
+
+    with pytest.raises(BrowseError):
+        await media_source.async_browse_media(hass, f"media-source://{DOMAIN}")
+
+
+async def test_hidden_source_without_media_source(hass: HomeAssistant, caplog) -> None:
+    from custom_components.laundry_hub.media import async_register_hidden_source
+
+    assert async_register_hidden_source(hass) is False
+    assert "can't attach garment photos" in caplog.text
 
 
 def test_taxonomy_coerce() -> None:
@@ -781,7 +818,38 @@ async def test_options_flow_wardrobe_fields(hass: HomeAssistant, entry) -> None:
     assert entry.options["ai_task_entity"] == "ai_task.real"
     assert entry.options["follow_ha_theme"] is True
     assert entry.runtime_data.snapshot()["follow_ha_theme"] is True
+    # With Wardrobe on, the options open on a menu (settings + purchase emails).
     result_ = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result_["type"] == "menu"
+    assert result_["menu_options"] == ["settings", "email_account"]
+    assert result_["description_placeholders"] == {"status": "not connected"}
+    result_ = await hass.config_entries.options.async_configure(
+        result_["flow_id"], {"next_step_id": "settings"}
+    )
+    assert result_["step_id"] == "settings"
     keys = {str(k): k for k in result_["data_schema"].schema}
     assert keys["ai_task_entity"].description == {"suggested_value": "ai_task.real"}
     _ = MappingProxyType({})
+
+
+async def test_auto_describe_after_url_import_adds_first_photo(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """Owner answer (v0.2.0 Q3): a URL import that adds the first photo describes it."""
+    hub = await setup_entry(hass, WARDROBE)
+    garment = hub.enroll(uid="11223344", name="Placeholder")
+    aioclient_mock.get(
+        "https://shop.example.com/p/123", text=fixture("jsonld.html"), headers=HTML
+    )
+    aioclient_mock.get("https://cdn.example.com/a.jpg", content=jpeg(), headers=JPEG)
+    aioclient_mock.get("https://shop.example.com/img/b.jpg", status=404)
+    preview = await hub.wardrobe.async_import_url("https://shop.example.com/p/123")
+    mock = AsyncMock(return_value=result({"type": "top", "summary": "A knit."}))
+    with patch.object(describe, "_generate_data", mock):
+        await hub.wardrobe.async_apply_import(garment, preview["token"])
+        await hass.async_block_till_done()
+    assert mock.await_count == 1
+    # The import's details reach the AI as context, and the brand stays locked.
+    assert "Old Navy" in mock.await_args.kwargs["instructions"]
+    assert garment.description["summary"] == "A knit."
+    assert garment.description_provenance["brand"] == "import"

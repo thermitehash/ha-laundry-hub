@@ -42,6 +42,7 @@ async def async_setup_entry(
         DryingSensor(hub),
         MissingSensor(hub),
         UnknownTagsSensor(hub),
+        UnmatchedPurchasesSensor(hub),
     ]
     bins = [
         BinSensor(hub, zone.id, zone.name) for zone in hub.zones_of(SUBENTRY_WASH_BIN)
@@ -190,6 +191,23 @@ class UnknownTagsSensor(_CountSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Last unknown tag."""
         return {"last_unknown": self.hub.catalog.last_unknown}
+
+
+class UnmatchedPurchasesSensor(_CountSensor):
+    """Purchase cards from order emails not yet matched to a garment."""
+
+    _attr_translation_key = "unmatched_purchases"
+    _attr_icon = "mdi:email-receive-outline"
+    _attr_native_unit_of_measurement = "purchases"
+
+    def __init__(self, hub: LaundryHub) -> None:
+        """Initialize."""
+        super().__init__(hub, "unmatched_purchases")
+
+    @property
+    def native_value(self) -> int:
+        """Count."""
+        return len(self.hub.purchases.unmatched())
 
 
 class BinSensor(_CountSensor):
