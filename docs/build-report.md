@@ -1,3 +1,40 @@
+# Laundry Hub build report: v0.2.1
+- Version: 0.2.1 / Date: 2026-11-27 / Repo: https://github.com/thermitehash/ha-laundry-hub
+- PR: https://github.com/thermitehash/ha-laundry-hub/pull/4 (not merged)
+- Commit: `276ec93` (code); this report is committed on top as a docs-only commit
+- CI: workflow **Validate**, run 46083905681 on `276ec93`: all 15 ✅
+  - Version consistency ✅ · Version bump ✅ (0.2.1 > 0.2.0) · lint (ruff, mypy --strict, yamllint) ✅
+  - tests (ubuntu) ✅ · tests (macOS) ✅ · mutation ✅ · panel (Playwright, screenshots artifact) ✅
+  - firmware-host-tests ubuntu/macOS ✅ · esphome compile st25r_i2c/rc522 × ubuntu/macOS ✅ · hassfest ✅ · hacs ✅
+  - The first run (on `a889e26`) failed because CI didn't install `aioimaplib`; fixed in `276ec93` (`requirements_test.txt`).
+- Release: `v0.2.1` is tagged automatically by the Release workflow once Validate passes on `main` after merge.
+
+## Summary
+- **Purchase inbox:** order emails from opted-in stores become purchase cards that can be matched to garments (Add flow, Closet → Purchases). Read-only IMAP owned by Laundry Hub, AI Task extraction, links verified against the email text.
+- **Carry-overs:** HEIC → JPEG in the browser, DNS pinning for every outbound fetch, Laundry Hub hidden from the media browser.
+
+## What shipped
+- **0. Carry-overs:** `lib.prepareUpload` (HEIC detection by type or name, `createImageBitmap` + canvas, friendly message); `importer.PinnedResolver` + one-off pinned session per hop; `media.py` registers a hidden source (no `media_source.py` platform); answers to v0.2.0 questions applied (auto-describe after import has its own test).
+- **1. Settings:** options menu with Wardrobe on; Step A account (Gmail or generic IMAP, login + EXAMINE tested, friendly `invalid_auth` / `cannot_connect` / `folder_not_found`, no partial save); Step B 37 stores with 90-day counts (UID searches only), matches first, none preselected, custom domains validated; Step C interval (≥15), backfill (0/30/90/365), clothing only, auto-archive. Status line, Edit stores, Change password, Check now, Disconnect (keep/delete cards). Repair issue + fix flow on login failure.
+- **2. Fetching:** `X-GM-RAW` for Gmail, `SINCE` + `FROM` per domain for generic IMAP; UIDVALIDITY + last UID per folder; headers first; body only for exact/subdomain sender matches; text/plain + text/html parts only via `BODY.PEEK[part]`, 500 KB cap; de-dup by Message-ID and order ref + store; shipping emails merge; one run at a time, backoff; `laundry_hub.check_purchase_emails`.
+- **3. Extraction:** stdlib HTML → text with `[image: …]` / `[link: …]` markers, 12k chars; selector-built `structure` with `items[]`; URLs kept only if verbatim in the sent text; non-apparel dropped when clothing-only; photos through the v0.2 pipeline; only card fields stored.
+- **4. Data + UI:** `purchases` + `purchase_meta` in the store (3.1 → 3.2, lossless); Add "Is this from a recent order?" row (copies photos, prefills, matches on save); Closet Purchases chip/inbox with match (garment search), dismiss, not clothing; detail origin line; `sensor.laundry_hub_unmatched_purchases`.
+- **5. Privacy:** EXAMINE only, never SELECT/STORE/COPY/MOVE/EXPUNGE; aioimaplib DEBUG/INFO muted during sessions; `Account.__repr__` hides address and password; diagnostics show store keys, counts, last error class only.
+
+## Tests
+- pytest: 285 passed locally (Python 3.14, HA 2026.10.4), coverage 96 % (gate 90 %); CI green on ubuntu and macOS.
+- New: `tests/test_purchases.py` (17), `tests/test_purchase_flow.py` (15), `tests/test_pinning.py` (4), plus media-browser, hidden-source and auto-describe-after-import tests; panel smoke test extended (order row, inbox, match sheet, origin line, HEIC).
+- Fake aioimaplib server (`tests/fake_imap.py`) with recorded `.eml` fixtures: Amazon multi-item with a PDF attachment, Old Navy + shipping update, Target with a lamp, a look-alike non-opted sender.
+- Mutation gate (state machine) unchanged and passing.
+
+## Needs a person or hardware
+- A real Gmail account with an app password: connect, check store counts, run Check now, confirm cards look right.
+- A real AI Task provider: extraction quality on real order emails.
+- iPhone Safari: HEIC conversion on a real photo.
+- Everything from earlier reports that needs hardware still does.
+
+---
+
 # Laundry Hub build report: v0.2.0
 - Version: 0.2.0 / Date: 2026-11-27 / Repo: https://github.com/thermitehash/ha-laundry-hub
 - PR: https://github.com/thermitehash/ha-laundry-hub/pull/3 (not merged)
