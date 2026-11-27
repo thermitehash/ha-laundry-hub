@@ -3,8 +3,17 @@
 - Date: 2026-11-27
 - Repo: https://github.com/thermitehash/ha-laundry-hub
 - PR: https://github.com/thermitehash/ha-laundry-hub/pull/1 (branch `claude/laundry-hub-build-rmcoqp`, not merged)
-- Commit: @@COMMIT@@
-- CI (per job): @@CI@@
+- Commit: `dca8d7d` (last code/CI change, all CI green); this report is committed on top as a docs-only commit
+- CI (per job), run 46058601373 on `dca8d7d`: all 13 ✅
+  - lint (ruff, ruff format, mypy --strict, yamllint) ✅
+  - tests (ubuntu-latest) ✅ · tests (macos-latest) ✅
+  - mutation ✅
+  - panel ✅
+  - firmware-host-tests (ubuntu-latest) ✅ · (macos-latest) ✅
+  - esphome (ubuntu-latest, st25r_i2c) ✅ · (ubuntu-latest, rc522) ✅
+  - esphome (macos-latest, st25r_i2c) ✅ · (macos-latest, rc522) ✅
+  - hassfest ✅
+  - hacs ✅ (license check deferred to `main`, see Open question 9)
 
 ## Summary
 Built in one pass against fakes, with no hardware on site. **Nothing is verified on hardware.**
@@ -153,7 +162,7 @@ Power: brightness limiter 5000 mA on a 6 A supply or 8500 mA on a 10 A supply; b
 - **Mutation (mutmut 3.8.1, `statemachine.py`):** 111/113 killed = **98.2 %** (target 85 %). The 2 survivors are equivalent mutants (`state` → `None` where `changed` is always true).
 - **Firmware host tests:** 484 checks passed (g++ `-std=c++17 -Wall -Wextra -Werror -pedantic`, ASan + UBSan).
 - **esphome config:** passed locally for all 3 stations × both readers (ESPHome 2026.11.1).
-- **esphome compile:** blocked locally. This sandbox's network policy denies `dl.espressif.com` and `components-file.espressif.com` (ESP-IDF registry). Compile runs in CI: @@COMPILE@@.
+- **esphome compile:** blocked locally. This sandbox's network policy denies `dl.espressif.com` and `components-file.espressif.com` (ESP-IDF registry). Compile is **green in CI** for both readers on ubuntu and macOS: the laundry station on both OSes, plus closet-1 on ubuntu. `st25r_i2c.cpp` compiles against upstream `st25r` for ESP32-S3 / ESP-IDF 5.5.6. Example closet-1 (st25r_i2c): RAM 31.0 % (106 KB of 342 KB), flash 49.0 % (898 KB of 1.8 MB).
 - **Panel smoke test** (headless Chromium, fake `hass`): passed. It renders all 3 pages, checks filters and the enroll prefill, shows server errors, and confirms that an XSS payload stays inert. Verified that the test fails when escaping is removed.
 - **Lint:** ruff, ruff format, mypy --strict (16 files, 0 issues), yamllint — clean.
 
@@ -168,7 +177,8 @@ Power: brightness limiter 5000 mA on a 6 A supply or 8500 mA on a 10 A supply; b
 | 6 | self-review (security) | Any ESPHome device could fire a tap claiming a configured station | Taps whose `device_id` mismatches the configured station device are ignored | `test_taps.py::test_tap_from_wrong_device_ignored` |
 | 7 | self-review (resource) | The unknown-tag notification throttle map grew without bound | Prune expired entries on insert | `test_taps.py::test_notify_throttle_map_pruned` |
 | 8 | Hypothesis model | Not a product bug: the model compared the missing sensor without letting its hourly refresh run. Documented as a known limitation (hourly granularity) | Model fires the refresh | `test_property.py` |
-@@CIBUGS@@
+| 9 | CI (panel job) | Playwright 1.56 has no Chromium for `ubuntu-latest` (now 26.04) | Panel job pinned to `ubuntu-24.04` | panel CI job |
+| 10 | CI (hacs job) | HACS failed: no license | Added MIT `LICENSE`. The license check is skipped on PRs only, because HACS reads default-branch metadata | hacs CI job (full check on `main`) |
 
 Self-review checklist:
 - Blocking calls: photo and file I/O in the executor; no sync I/O in the loop. Flagged by a test check (`ASYNC` ruff rules).
