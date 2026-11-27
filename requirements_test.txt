@@ -1,0 +1,9 @@
+# Test/lint toolchain (Python 3.14). Pinned for reproducible CI.
+pytest-homeassistant-custom-component==0.13.375
+home-assistant-frontend==20260930.5
+hypothesis==6.170.22
+pytest-cov==7.1.0
+mutmut==3.8.1
+ruff==0.17.6
+mypy==2.4.1
+yamllint==1.38.0

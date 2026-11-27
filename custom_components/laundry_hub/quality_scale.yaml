@@ -1,0 +1,86 @@
+# Integration quality scale self-assessment (target: Silver).
+rules:
+  # Bronze
+  action-setup: done  # services registered in async_setup
+  appropriate-polling:
+    status: exempt
+    comment: Push-based (HA events); no polling. Missing detection refreshes hourly.
+  brands: done  # local brand/ images (placeholders)
+  common-modules: done
+  config-flow-test-coverage: done
+  config-flow: done
+  dependency-transparency:
+    status: exempt
+    comment: No external requirements.
+  docs-actions: done
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  entity-event-setup: done
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure:
+    status: exempt
+    comment: No device connection to test; station devices are optional and validated.
+  test-before-setup:
+    status: exempt
+    comment: No external connection at setup; storage errors are handled by quarantine.
+  unique-config-entry: done  # single_config_entry
+  # Silver
+  action-exceptions: done
+  config-entry-unloading: done
+  docs-configuration-parameters: done
+  docs-installation-parameters: done
+  entity-unavailable:
+    status: exempt
+    comment: Entities are derived from local storage and are always available.
+  integration-owner: done
+  log-when-unavailable:
+    status: exempt
+    comment: No polled device; unavailable lights/stations are logged per tap.
+  parallel-updates: done
+  reauthentication-flow:
+    status: exempt
+    comment: No authentication.
+  test-coverage: done  # >= 90% enforced in CI
+  # Gold (partial)
+  devices: done
+  diagnostics: done
+  discovery:
+    status: exempt
+    comment: Nothing to discover.
+  discovery-update-info:
+    status: exempt
+    comment: Nothing to discover.
+  docs-data-update: done
+  docs-examples: done
+  docs-known-limitations: done
+  docs-supported-devices: done
+  docs-supported-functions: done
+  docs-troubleshooting: done
+  docs-use-cases: done
+  dynamic-devices:
+    status: exempt
+    comment: Single service device.
+  entity-category: todo
+  entity-device-class:
+    status: exempt
+    comment: Garment counts have no matching device class.
+  entity-disabled-by-default:
+    status: exempt
+    comment: All entities are primary.
+  entity-translations: done
+  exception-translations: done
+  icon-translations: todo
+  reconfiguration-flow: done  # options flow + subentry reconfigure
+  repair-issues: done  # zone_restored issue
+  stale-devices:
+    status: exempt
+    comment: Single service device.
+  # Platinum
+  async-dependency: done
+  inject-websession:
+    status: exempt
+    comment: No HTTP client.
+  strict-typing: done  # mypy --strict in CI

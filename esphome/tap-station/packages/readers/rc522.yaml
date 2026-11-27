@@ -1,0 +1,11 @@
+# Fallback: Unit RFID2 (WS1850S) with ESPHome's rc522_i2c.
+rc522_i2c:
+  id: nfc_reader
+  i2c_id: grove_i2c
+  address: 0x28
+  update_interval: 250ms
+  on_tag:
+    then:
+      - script.execute:
+          id: handle_tag
+          raw_uid: !lambda "return x;"

@@ -1,0 +1,114 @@
+enroll_garment:
+  fields:
+    uid:
+      required: true
+      example: "04A1B2C3D4E5F6"
+      selector:
+        text:
+    name:
+      required: true
+      example: "Blue hoodie"
+      selector:
+        text:
+    wash_bin:
+      example: "Darks"
+      selector:
+        text:
+    dry_type:
+      example: "Hang rod"
+      selector:
+        text:
+    owner:
+      selector:
+        entity:
+          domain: person
+    notes:
+      selector:
+        text:
+          multiline: true
+    location:
+      selector:
+        select:
+          translation_key: closet
+          options:
+            - closet_1
+            - closet_2
+update_garment:
+  fields:
+    garment:
+      required: true
+      selector:
+        text:
+    name:
+      selector:
+        text:
+    owner:
+      selector:
+        entity:
+          domain: person
+    wash_bin:
+      selector:
+        text:
+    dry_type:
+      selector:
+        text:
+    notes:
+      selector:
+        text:
+          multiline: true
+    add_uid:
+      selector:
+        text:
+    remove_uid:
+      selector:
+        text:
+remove_garment:
+  fields:
+    garment:
+      required: true
+      selector:
+        text:
+set_location:
+  fields:
+    garment:
+      required: true
+      selector:
+        text:
+    location:
+      required: true
+      selector:
+        select:
+          translation_key: location
+          options:
+            - closet_1
+            - closet_2
+            - in_wash
+            - drying
+reassign:
+  fields:
+    field:
+      required: true
+      selector:
+        select:
+          translation_key: field
+          options:
+            - wash_bin
+            - dry_type
+    to:
+      required: true
+      selector:
+        text:
+    garments:
+      selector:
+        text:
+          multiple: true
+    from:
+      selector:
+        text:
+flash_zone:
+  fields:
+    zone:
+      required: true
+      example: "Darks"
+      selector:
+        text:

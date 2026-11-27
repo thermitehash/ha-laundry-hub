@@ -1,0 +1,49 @@
+# Laundry station only: the AtomS3 Lite button cycles auto -> sort -> dry -> auto.
+select:
+  - platform: template
+    id: tap_mode_select
+    name: Tap mode
+    icon: mdi:washing-machine
+    options: [auto, sort, dry]
+    initial_option: auto
+    optimistic: true
+    restore_value: false
+    on_value:
+      then:
+        - lambda: |-
+            id(tap_mode) = static_cast<int>(i);
+            id(last_activity_ms) = millis();
+        - script.execute: show_idle
+
+binary_sensor:
+  - platform: gpio
+    id: mode_button
+    name: Mode button
+    internal: true
+    pin:
+      number: GPIO41
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    filters:
+      - delayed_on: 20ms
+    on_click:
+      min_length: 30ms
+      max_length: 800ms
+      then:
+        - select.next:
+            id: tap_mode_select
+            cycle: true
+
+interval:
+  - interval: 10s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(tap_mode) != 0 && millis() - id(last_activity_ms) >= ${mode_idle_timeout_ms};'
+          then:
+            - logger.log: "Tap mode idle; back to auto"
+            - select.set:
+                id: tap_mode_select
+                option: auto
