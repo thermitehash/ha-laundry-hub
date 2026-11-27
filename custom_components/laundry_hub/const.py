@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "laundry_hub"
 NAME: Final = "Laundry Hub"
-VERSION: Final = "0.1.2"
+VERSION: Final = "0.2.0"
 
 # Event fired by the tap stations (ESPHome `homeassistant.event`).
 TAP_EVENT: Final = "esphome.laundry_tap"
@@ -31,6 +31,9 @@ CONF_FEEDBACK_TIMEOUT: Final = "feedback_timeout"
 CONF_FLASH_DURATION: Final = "flash_duration"
 CONF_MISSING_AFTER: Final = "missing_after_days"
 CONF_NOTIFY_TARGET: Final = "notify_target"
+CONF_WARDROBE_ENABLED: Final = "wardrobe_enabled"
+CONF_AI_TASK_ENTITY: Final = "ai_task_entity"
+CONF_FOLLOW_HA_THEME: Final = "follow_ha_theme"
 
 DEFAULT_FEEDBACK_TIMEOUT: Final = 2.0
 DEFAULT_FLASH_DURATION: Final = 15
@@ -84,12 +87,31 @@ REPEAT_WINDOW: Final = timedelta(minutes=5)
 
 # Storage.
 STORAGE_KEY: Final = DOMAIN
-STORAGE_VERSION: Final = 2
+STORAGE_VERSION: Final = 3
 STORAGE_SAVE_DELAY: Final = 5  # seconds (debounced writes)
 
 PHOTO_DIR: Final = "laundry_hub/photos"
-PHOTO_MAX_BYTES: Final = 2 * 1024 * 1024
+PHOTO_MAX_BYTES: Final = 2 * 1024 * 1024  # legacy base64 websocket upload (v0.1)
+PHOTO_UPLOAD_MAX_BYTES: Final = 10 * 1024 * 1024  # per upload, before resize
+PHOTO_MAX_PER_GARMENT: Final = 8
+PHOTO_LONG_EDGE: Final = 1600
+PHOTO_THUMB_EDGE: Final = 400
 PHOTO_TYPES: Final = {"image/jpeg": "jpg", "image/png": "png", "image/webp": "webp"}
+PHOTOS_URL: Final = "/api/laundry_hub/photos"
+PHOTO_URL_TTL_HOURS: Final = 24
+
+# Product URL import.
+IMPORT_TIMEOUT: Final = 10
+IMPORT_MAX_HTML: Final = 3 * 1024 * 1024
+IMPORT_MAX_IMAGES: Final = 4
+IMPORT_MAX_REDIRECTS: Final = 5
+IMPORT_USER_AGENT: Final = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0 Safari/537.36"
+)
+
+# AI description.
+DESCRIBE_MAX_ATTACHMENTS: Final = 3
 
 # Panel.
 PANEL_URL: Final = "laundry"
@@ -101,6 +123,7 @@ PHOTO_URL: Final = "/api/laundry_hub/photo"
 
 # Dispatcher signal: catalog changed.
 SIGNAL_UPDATE: Final = f"{DOMAIN}_update"
+SIGNAL_TAP: Final = f"{DOMAIN}_tap"
 
 # Limits / validation.
 MAX_NAME_LEN: Final = 100

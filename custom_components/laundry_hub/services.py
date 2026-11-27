@@ -76,6 +76,14 @@ REASSIGN_SCHEMA = vol.All(
     cv.has_at_least_one_key("garments", "from"),
 )
 FLASH_SCHEMA = vol.Schema({vol.Required("zone"): cv.string})
+IMPORT_SCHEMA = vol.Schema(
+    {
+        vol.Required("url"): vol.All(cv.string, vol.Length(max=2000)),
+        vol.Optional(ATTR_GARMENT): cv.string,
+        vol.Optional("apply", default=False): cv.boolean,
+    }
+)
+DESCRIBE_SCHEMA = vol.Schema({vol.Required(ATTR_GARMENT): cv.string})
 
 
 def _hub(hass: HomeAssistant) -> LaundryHub:
@@ -138,3 +146,35 @@ def async_setup_services(hass: HomeAssistant) -> None:
         supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(DOMAIN, "flash_zone", flash_zone, schema=FLASH_SCHEMA)
+
+    async def import_product_url(call: ServiceCall) -> ServiceResponse:
+        hub = _hub(hass)
+        preview = await hub.wardrobe.async_import_url(call.data["url"])
+        preview.pop("image_count", None)
+        if call.data["apply"]:
+            if ATTR_GARMENT not in call.data:
+                raise validation_error("garment_required", "apply needs a garment")
+            garment = hub.resolve_garment(call.data[ATTR_GARMENT])
+            await hub.wardrobe.async_apply_import(garment, preview["token"])
+            preview["applied_to"] = garment.id
+        return preview
+
+    async def describe_garment(call: ServiceCall) -> ServiceResponse:
+        hub = _hub(hass)
+        garment = hub.resolve_garment(call.data[ATTR_GARMENT])
+        return {"description": await hub.wardrobe.async_describe(garment)}
+
+    hass.services.async_register(
+        DOMAIN,
+        "import_product_url",
+        import_product_url,
+        schema=IMPORT_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "describe_garment",
+        describe_garment,
+        schema=DESCRIBE_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )

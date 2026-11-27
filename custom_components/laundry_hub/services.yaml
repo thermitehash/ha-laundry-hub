@@ -112,3 +112,24 @@ flash_zone:
       example: "Darks"
       selector:
         text:
+import_product_url:
+  fields:
+    url:
+      required: true
+      example: "https://www.example.com/product/123"
+      selector:
+        text:
+          type: url
+    garment:
+      selector:
+        text:
+    apply:
+      default: false
+      selector:
+        boolean:
+describe_garment:
+  fields:
+    garment:
+      required: true
+      selector:
+        text:

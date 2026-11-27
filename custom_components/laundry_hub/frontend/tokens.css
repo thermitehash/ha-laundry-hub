@@ -1,0 +1,81 @@
+/*
+ * Hub design tokens v1: shared by Laundry Hub and Pantry Hub.
+ * Docs: docs/design/tokens.md. Approved mockups: "One family, two personalities".
+ *
+ * Structure tokens (--hub-*) are identical in every app. Each app sets its own
+ * accent palette (Laundry: --lh-*, Pantry: --ph-*) and maps it onto --app-*.
+ * Surfaces and text come from Home Assistant theme variables so light and dark
+ * mode follow HA; the Hub values are the fallbacks.
+ */
+:host,
+:root {
+  /* Type: Inter, falling back to the system UI font (no web font download). */
+  --hub-font: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --hub-text-sm: 13px;
+  --hub-text-md: 16px;
+  --hub-text-lg: 20px;
+  --hub-text-xl: 28px;
+  /* Spacing scale */
+  --hub-space-1: 4px;
+  --hub-space-2: 8px;
+  --hub-space-3: 12px;
+  --hub-space-4: 16px;
+  --hub-space-5: 24px;
+  --hub-space-6: 32px;
+  /* Radius: controls / cards / chips */
+  --hub-radius-control: 12px;
+  --hub-radius-card: 16px;
+  --hub-radius-pill: 999px;
+  --hub-touch: 44px;
+  /* Neutrals and status (shared) */
+  --hub-ink: #1c1b19;
+  --hub-muted: #5c5953;
+  --hub-ground: #f6f5f2;
+  --hub-ok: #2e7d4f;
+  --hub-warn: #9a6412;
+  --hub-problem: #b3261e;
+  --hub-warn-tint: #fbefd9;
+
+  /* Laundry palette "Linen & Teal" */
+  --lh-accent: #1f6f8b;
+  --lh-accent-pressed: #155468;
+  --lh-accent-tint: #e2eff3;
+  --lh-surface: #f3f7f8;
+  --lh-border: #dce6e9;
+  --lh-border-strong: #c5d6db;
+  --lh-on-accent: #ffffff;
+
+  /* App mapping (Pantry Hub maps --ph-* here instead) */
+  --app-accent: var(--lh-accent);
+  --app-accent-pressed: var(--lh-accent-pressed);
+  --app-accent-tint: var(--lh-accent-tint);
+  --app-surface: var(--lh-surface);
+  --app-border: var(--lh-border);
+  --app-border-strong: var(--lh-border-strong);
+  --app-on-accent: var(--lh-on-accent);
+
+  /* Surfaces and text follow HA theme variables */
+  --hub-card: var(--card-background-color, #ffffff);
+  --hub-text: var(--primary-text-color, var(--hub-ink));
+  --hub-text-muted: var(--secondary-text-color, var(--hub-muted));
+  --hub-divider: var(--divider-color, var(--app-border));
+  --hub-page: var(--app-surface);
+}
+
+/* Dark mode: same hues, accent lightened ~15%, surfaces from HA. */
+:host([dark]) {
+  --lh-accent: #41859d;
+  --lh-accent-pressed: #6aa3b7;
+  --lh-accent-tint: #1d3640;
+  --lh-surface: var(--primary-background-color, #111618);
+  --lh-border: #2c3a3f;
+  --lh-border-strong: #3d5058;
+  --hub-warn-tint: #3a2c13;
+  --hub-page: var(--primary-background-color, #111618);
+}
+
+/* Optional: follow the HA theme's primary colour (off by default). */
+:host([follow-ha]) {
+  --app-accent: var(--primary-color, var(--lh-accent));
+  --app-accent-pressed: var(--dark-primary-color, var(--primary-color, var(--lh-accent-pressed)));
+}

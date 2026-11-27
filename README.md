@@ -5,7 +5,7 @@ tracking and laundry sorting lights. Tap a tagged garment on a station and Laund
 works out where it goes next. The matching wash bin or dry zone lights up on a WLED strip,
 and the station's LED confirms the tap.
 
-> **Status: v0.1.2, unverified on hardware.** Everything is built and tested against fakes
+> **Status: v0.2.0, unverified on hardware.** Everything is built and tested against fakes
 > (see [`docs/build-report.md`](docs/build-report.md)). Stations, readers, tags and WLED
 > have not been tested on real hardware yet.
 
@@ -52,6 +52,9 @@ Everything is configured in the UI.
 | Light flash duration   | 15 s    | How long a zone light stays on |
 | Missing after          | 14 days | Not tapped for this long → missing |
 | Notify target          | –       | `notify.xyz` entity or a notify action such as `mobile_app_phone` (enrollment prompts) |
+| Wardrobe catalog       | off     | Photos, purchase details and AI descriptions per garment (see below) |
+| AI Task entity         | –       | Used to describe garments from their photos (optional) |
+| Follow HA theme colour | off     | Use your HA theme's primary colour instead of Laundry teal |
 
 **Wash bins and dry types** are config subentries under **Settings → Devices & services →
 Laundry Hub**. Use *Add wash bin* / *Add dry type*, or **Reconfigure** an existing one to
@@ -66,19 +69,54 @@ Laundry Hub restores it immediately and raises a repair issue that explains what
 
 ## Laundry panel
 
-The **Laundry** sidebar panel is admin-only:
+The **Laundry** sidebar panel is admin-only and built for phones first: a bottom tab bar on
+phones, a top bar on wide screens. It follows Home Assistant's light and dark mode, and taps,
+moves and new garments appear without a refresh.
 
-- **Garments**: search and filter by owner, bin or location; add, edit (name, owner, bin, dry
-  type, notes, tags, photo) and delete garments; bulk reassign bin or dry type.
-- **Enroll**: shows the last unknown tag with a create-garment form prefilled with its UID.
-  The enrollment notification links here.
-- **Status**: what is in each closet, in the wash per bin, drying, and missing; test each zone light.
+- **Home**: a tile per closet and wash bin with a count and cover photos, drying items, and a
+  card for missing garments. Tap a tile to open those garments in Closet.
+- **Closet**: photo cards (or initials on the bin colour). Search, plus filter chips for owner,
+  location and wash bin. **Select** lets you move several garments to a bin, change their dry
+  type or owner, set a field, or delete them.
+- **Add**: tap the new tag on any station and the form fills in by itself. Then name, owner, wash
+  bin and dry type (it remembers your last dry type per bin). With Wardrobe on, you can also add
+  photos, purchase details and a description.
+- **Settings**: bins, dry types and station health (online, last tap), with a link to the
+  integration options for changes.
+- **Garment detail**: photos, where it is now, bin and dry type, wardrobe details and the last
+  10 taps. Edit and Delete are in the ⋯ menu.
 
-![Garments page](docs/screenshots/garments.png)
-![Enroll page](docs/screenshots/enroll.png)
-![Status page](docs/screenshots/status.png)
+Old links (`/laundry?page=enroll&uid=…`) still open the right screen.
 
-*(Screenshot placeholders, to be added once running on real hardware.)*
+Design tokens shared with Pantry Hub: [`docs/design/tokens.md`](docs/design/tokens.md).
+
+## Wardrobe catalog (optional)
+
+Turn on **Wardrobe catalog** in Laundry Hub → Configure. It's off by default; with it off,
+everything works exactly as in v0.1.2.
+
+- **Photos**: up to 8 per garment, taken straight from the phone camera. Each photo is resized to
+  1600 px plus a 400 px thumbnail, rotated upright, and stripped of metadata such as location.
+  Photos are stored in `/config/laundry_hub/photos/` and only shown to logged-in admins, never
+  from `/local` or `www/`.
+- **Purchase details**: brand, size (as printed, plus size system and cut), store, date, price
+  (in your Home Assistant currency), product link and order reference.
+- **Import from link**: paste a product page link to fill in name, brand, price and up to 4 photos.
+  You see a preview first; nothing is saved until you tap Save. Only public http/https pages are
+  fetched; local and private network addresses are refused.
+- **AI descriptions** (needs an **AI Task entity** in the options): the cover and up to two more
+  photos are sent to your AI Task provider, which classifies the garment from a fixed list (type,
+  kind, colours, pattern, sleeve, neckline, length, fit, rise, material, formality, warmth, seasons,
+  occasions) plus a one-line summary. Uncertain answers are left as "Not set". Anything you change
+  by hand is locked, and re-describing never overwrites it (**Reset to AI** unlocks it).
+- **Wear context**: what each garment is for (anything, work, never to work, occasions, athletic)
+  and whether it's a uniform. Each person's "work" label can be renamed, for example "School".
+- **Filters**: every detail above is a Closet filter with counts, plus **Needs photo** and **Needs
+  review**. Search also matches details, for example "navy long sleeve".
+
+> **Privacy:** when a garment is described, its photos and details are sent to the AI
+> provider behind the AI Task entity you chose. Nothing is sent unless Wardrobe is on and an
+> AI Task entity is set. Product-link imports fetch only the page you paste and its images.
 
 ## Entities
 
@@ -102,6 +140,8 @@ The **Laundry** sidebar panel is admin-only:
 | `laundry_hub.set_location` | `garment`, `location` (`closet_1`, `closet_2`, `in_wash`, `drying`) |
 | `laundry_hub.reassign` | `field` (`wash_bin`/`dry_type`), `to`, and `garments` or `from` (returns `moved`) |
 | `laundry_hub.flash_zone` | `zone` (wash bin or dry type, name or id) |
+| `laundry_hub.import_product_url` | `url`, `garment`?, `apply`? (returns the details found; with `apply` saves them). Needs Wardrobe on |
+| `laundry_hub.describe_garment` | `garment` (describes it with the AI Task entity). Needs Wardrobe on |
 
 Wash bins and dry types accept a name (case-insensitive) or a subentry id. A garment can
 have several tags (replacement tags), and a tag belongs to at most one garment.
@@ -132,9 +172,14 @@ actions:
 
 ## Data and privacy
 
-The catalog is stored locally in `/config/.storage/laundry_hub`: versioned, written
-atomically and debounced. Photos live in `/config/laundry_hub/photos/` (JPEG, PNG or WebP,
-up to 2 MB). Diagnostics redact names, owners, notes, tag UIDs and notify targets.
+The catalog is stored locally in `/config/.storage/laundry_hub` (format v3): versioned, written
+atomically and debounced. Photos live in `/config/laundry_hub/photos/`. Diagnostics redact names,
+owners, notes, tag UIDs, photos, purchase details and notify targets.
+
+**Going back to v0.1.2:** v0.2 converts the catalog to a new format and keeps the old one as
+`/config/.storage/laundry_hub.v2.backup`. To roll back: stop Home Assistant, install v0.1.2,
+replace `/config/.storage/laundry_hub` with the backup file (rename it), then start Home Assistant.
+Changes made under v0.2 are not in the backup.
 
 ## Troubleshooting
 

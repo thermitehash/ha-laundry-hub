@@ -11,7 +11,10 @@
           "feedback_timeout": "Feedback timeout",
           "flash_duration": "Light flash duration",
           "missing_after_days": "Missing after",
-          "notify_target": "Notify target for enrollment prompts"
+          "notify_target": "Notify target for enrollment prompts",
+          "wardrobe_enabled": "Wardrobe catalog",
+          "ai_task_entity": "AI Task entity for descriptions",
+          "follow_ha_theme": "Follow HA theme colour"
         },
         "data_description": {
           "laundry_device": "ESPHome device of the laundry room tap station (optional until the hardware is flashed).",
@@ -20,13 +23,17 @@
           "feedback_timeout": "How long to wait for a station to accept LED feedback.",
           "flash_duration": "How long a bin or dry zone light stays on after a tap.",
           "missing_after_days": "A garment not tapped for this many days is listed as missing.",
-          "notify_target": "A notify entity (notify.xyz) or a notify action such as mobile_app_my_phone."
+          "notify_target": "A notify entity (notify.xyz) or a notify action such as mobile_app_my_phone.",
+          "wardrobe_enabled": "Adds purchase details, photos and AI descriptions per garment. When describing, photos and descriptions are sent to the chosen AI provider.",
+          "ai_task_entity": "Optional. Used to describe garments from their photos.",
+          "follow_ha_theme": "Use your Home Assistant theme's primary colour instead of Laundry Hub's teal."
         }
       }
     },
     "error": {
       "duplicate_device": "Each station needs its own ESPHome device.",
-      "notify_not_found": "No notify entity or notify action with this name."
+      "notify_not_found": "No notify entity or notify action with this name.",
+      "ai_entity_not_found": "That AI Task entity doesn't exist."
     },
     "abort": {
       "single_instance_allowed": "Laundry Hub is already configured."
@@ -43,7 +50,10 @@
           "feedback_timeout": "Feedback timeout",
           "flash_duration": "Light flash duration",
           "missing_after_days": "Missing after",
-          "notify_target": "Notify target for enrollment prompts"
+          "notify_target": "Notify target for enrollment prompts",
+          "wardrobe_enabled": "Wardrobe catalog",
+          "ai_task_entity": "AI Task entity for descriptions",
+          "follow_ha_theme": "Follow HA theme colour"
         },
         "data_description": {
           "laundry_device": "ESPHome device of the laundry room tap station (optional until the hardware is flashed).",
@@ -52,13 +62,17 @@
           "feedback_timeout": "How long to wait for a station to accept LED feedback.",
           "flash_duration": "How long a bin or dry zone light stays on after a tap.",
           "missing_after_days": "A garment not tapped for this many days is listed as missing.",
-          "notify_target": "A notify entity (notify.xyz) or a notify action such as mobile_app_my_phone."
+          "notify_target": "A notify entity (notify.xyz) or a notify action such as mobile_app_my_phone.",
+          "wardrobe_enabled": "Adds purchase details, photos and AI descriptions per garment. When describing, photos and descriptions are sent to the chosen AI provider.",
+          "ai_task_entity": "Optional. Used to describe garments from their photos.",
+          "follow_ha_theme": "Use your Home Assistant theme's primary colour instead of Laundry Hub's teal."
         }
       }
     },
     "error": {
       "duplicate_device": "Each station needs its own ESPHome device.",
-      "notify_not_found": "No notify entity or notify action with this name."
+      "notify_not_found": "No notify entity or notify action with this name.",
+      "ai_entity_not_found": "That AI Task entity doesn't exist."
     }
   },
   "config_subentries": {
@@ -237,7 +251,7 @@
       "message": "Invalid location: {location}."
     },
     "invalid_field": {
-      "message": "Field must be wash_bin or dry_type."
+      "message": "Unknown field: {field}."
     },
     "last_tag": {
       "message": "Tag {uid} is the garment's only tag; add another first."
@@ -258,10 +272,55 @@
       "message": "Unsupported photo type."
     },
     "photo_too_large": {
-      "message": "Photo is larger than 2 MB."
+      "message": "Photo is larger than the size limit."
     },
     "photo_invalid": {
       "message": "Photo data is invalid."
+    },
+    "wardrobe_disabled": {
+      "message": "Turn on Wardrobe in Laundry Hub's settings to use this."
+    },
+    "no_ai_entity": {
+      "message": "Choose an AI Task entity in Laundry Hub's settings."
+    },
+    "describe_failed": {
+      "message": "The garment couldn't be described; the old description was kept."
+    },
+    "invalid_field_value": {
+      "message": "Invalid value for {field}."
+    },
+    "photo_limit": {
+      "message": "A garment can have at most {limit} photos."
+    },
+    "unknown_photo": {
+      "message": "That photo isn't on this garment."
+    },
+    "import_failed": {
+      "message": "Couldn't import that page."
+    },
+    "import_blocked": {
+      "message": "This store blocks automatic imports — add photos with your camera instead."
+    },
+    "import_timeout": {
+      "message": "That page took too long to answer."
+    },
+    "import_nothing": {
+      "message": "Couldn't find product details on that page."
+    },
+    "import_not_allowed": {
+      "message": "That address can't be imported (only public http or https pages)."
+    },
+    "import_unreachable": {
+      "message": "Couldn't reach that page."
+    },
+    "import_not_image": {
+      "message": "That link isn't an image."
+    },
+    "import_expired": {
+      "message": "That import has expired — import the link again."
+    },
+    "garment_required": {
+      "message": "Choose a garment to apply the import to."
     }
   },
   "issues": {
@@ -396,6 +455,34 @@
         "zone": {
           "name": "Zone",
           "description": "Wash bin or dry type (name or id)."
+        }
+      }
+    },
+    "import_product_url": {
+      "name": "Import product URL",
+      "description": "Read a product page (name, brand, price, photos). Needs Wardrobe on.",
+      "fields": {
+        "url": {
+          "name": "URL",
+          "description": "Product page address (public http/https)."
+        },
+        "garment": {
+          "name": "Garment",
+          "description": "Garment id or tag UID to apply the import to."
+        },
+        "apply": {
+          "name": "Apply",
+          "description": "Save the details and photos to the garment instead of only returning them."
+        }
+      }
+    },
+    "describe_garment": {
+      "name": "Describe garment",
+      "description": "Describe a garment from its photos with the configured AI Task entity. Fields you set by hand are kept.",
+      "fields": {
+        "garment": {
+          "name": "Garment",
+          "description": "Garment id or one of its tag UIDs."
         }
       }
     }

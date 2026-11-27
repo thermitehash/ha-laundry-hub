@@ -13,3 +13,4 @@ esphome/tap-station/.esphome/
 esphome/tap-station/tests/test_st25r_i2c_proto
 node_modules/
 .venv/
+tests/panel/screenshots/

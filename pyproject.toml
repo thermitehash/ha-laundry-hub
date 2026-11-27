@@ -1,6 +1,6 @@
 [project]
 name = "ha-laundry-hub"
-version = "0.1.2"
+version = "0.2.0"
 requires-python = ">=3.13"
 
 [tool.pytest.ini_options]
@@ -28,7 +28,8 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "ASYNC", "RUF", "PL", "C4", "PIE
 ignore = ["D401", "TRY400", "D203", "D213", "PLR0913", "PLR2004", "TRY003", "PLR0912", "PLR0911", "RUF001", "PLR0915", "D105", "D107", "TRY300"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["D", "ASYNC240", "PLR", "PLC0415", "S101", "SLF001", "RUF", "SIM105", "B017", "TRY"]
+"custom_components/laundry_hub/taxonomy.py" = ["E501"]  # vocabulary tables
+"tests/*" = ["E501", "C416", "D", "ASYNC240", "PLR", "PLC0415", "S101", "SLF001", "RUF", "SIM105", "B017", "TRY"]
 
 [tool.ruff.lint.isort]
 force-sort-within-sections = true

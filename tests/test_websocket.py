@@ -13,7 +13,19 @@ from custom_components.laundry_hub.hub import LaundryHub
 
 from .conftest import bin_id, dry_id
 
-PNG = base64.b64encode(b"\x89PNG\r\n\x1a\n" + b"0" * 64).decode()
+
+def _image(fmt: str) -> str:
+    import io
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", (40, 30), (200, 30, 30)).save(out, fmt)
+    return base64.b64encode(out.getvalue()).decode()
+
+
+PNG = _image("PNG")
+JPG = _image("JPEG")
 
 
 @pytest.fixture
@@ -259,26 +271,31 @@ async def test_unknown_dismiss(ws, hub: LaundryHub) -> None:
 
 
 async def test_photo(hass: HomeAssistant, ws, hub: LaundryHub, hass_client) -> None:
+    """Legacy (v0.1) base64 upload still works, through the v0.2 pipeline."""
     a = hub.enroll(uid="11223344", name="A")
     msg = await ws("photo/upload", garment_id=a.id, content_type="image/png", data=PNG)
     assert msg["success"], msg
-    assert msg["result"]["photo"] == f"{a.id}.png"
-    path = hass.config.path("laundry_hub/photos", f"{a.id}.png")
+    first = msg["result"]["photo"]
+    assert first.startswith(f"{a.id}-") and first.endswith(".jpg")
+    assert msg["result"]["photos"] == [first]
     import os
 
+    path = hass.config.path("laundry_hub/photos", first)
     assert os.path.isfile(path)
+    assert os.path.isfile(path.replace(".jpg", ".thumb.jpg"))
 
     client = await hass_client()
     resp = await client.get(f"/api/laundry_hub/photo/{a.id}")
     assert resp.status == 200
-    assert (await resp.read()).startswith(b"\x89PNG")
+    assert (await resp.read()).startswith(b"\xff\xd8")  # re-encoded as JPEG
     resp = await client.get("/api/laundry_hub/photo/nope")
     assert resp.status == 404
 
-    # Replace with jpeg removes the png.
-    jpg = base64.b64encode(b"\xff\xd8\xff" + b"1" * 10).decode()
-    msg = await ws("photo/upload", garment_id=a.id, content_type="image/jpeg", data=jpg)
-    assert msg["result"]["photo"] == f"{a.id}.jpg"
+    # Wardrobe off: a second upload replaces the single photo.
+    msg = await ws("photo/upload", garment_id=a.id, content_type="image/jpeg", data=JPG)
+    second = msg["result"]["photo"]
+    assert second != first
+    assert msg["result"]["photos"] == [second]
     assert not os.path.exists(path)
 
     msg = await ws("photo/upload", garment_id=a.id, content_type="image/gif", data=PNG)
@@ -292,6 +309,9 @@ async def test_photo(hass: HomeAssistant, ws, hub: LaundryHub, hass_client) -> N
     big = base64.b64encode(b"0" * (PHOTO_MAX_BYTES + 1)).decode()
     msg = await ws("photo/upload", garment_id=a.id, content_type="image/png", data=big)
     assert msg["error"]["code"] == "photo_too_large"
+    junk = base64.b64encode(b"not an image").decode()
+    msg = await ws("photo/upload", garment_id=a.id, content_type="image/png", data=junk)
+    assert msg["error"]["code"] == "photo_invalid"
 
     msg = await ws("photo/delete", garment_id=a.id)
     assert msg["result"]["photo"] is None
@@ -300,20 +320,22 @@ async def test_photo(hass: HomeAssistant, ws, hub: LaundryHub, hass_client) -> N
     resp = await client.get(f"/api/laundry_hub/photo/{a.id}")
     assert resp.status == 404
 
-    # Deleting a garment deletes its photo.
-    await ws("photo/upload", garment_id=a.id, content_type="image/png", data=PNG)
+    # Deleting a garment deletes its photos.
+    msg = await ws("photo/upload", garment_id=a.id, content_type="image/png", data=PNG)
+    third = hass.config.path("laundry_hub/photos", msg["result"]["photo"])
     await ws("garment/delete", garment_id=a.id)
-    assert not os.path.exists(path)
+    assert not os.path.exists(third)
+    assert not os.path.exists(third.replace(".jpg", ".thumb.jpg"))
 
 
 async def test_photo_file_missing_on_disk(
     hass: HomeAssistant, ws, hub: LaundryHub, hass_client
 ) -> None:
     a = hub.enroll(uid="11223344", name="A")
-    a.photo = "../../etc/passwd"
+    a.photos = ["../../etc/passwd"]
     client = await hass_client()
     assert (await client.get(f"/api/laundry_hub/photo/{a.id}")).status == 404
-    a.photo = f"{a.id}.png"  # not written
+    a.photos = [f"{a.id}.png"]  # not written
     assert (await client.get(f"/api/laundry_hub/photo/{a.id}")).status == 404
 
 
@@ -322,7 +344,7 @@ async def test_photo_write_error(hass: HomeAssistant, ws, hub: LaundryHub) -> No
 
     a = hub.enroll(uid="11223344", name="A")
     with patch(
-        "custom_components.laundry_hub.hub.write_photo",
+        "custom_components.laundry_hub.wardrobe.write_processed",
         side_effect=OSError("disk full"),
     ):
         msg = await ws(
@@ -330,9 +352,10 @@ async def test_photo_write_error(hass: HomeAssistant, ws, hub: LaundryHub) -> No
         )
     assert msg["error"]["code"] == "failed"
     assert "disk full" in msg["error"]["message"]
-    a.photo = f"{a.id}.png"
+    await ws("photo/upload", garment_id=a.id, content_type="image/png", data=PNG)
     with patch(
-        "custom_components.laundry_hub.hub.delete_photo", side_effect=OSError("ro fs")
+        "custom_components.laundry_hub.wardrobe.delete_photo",
+        side_effect=OSError("ro fs"),
     ):
         msg = await ws("photo/delete", garment_id=a.id)
     assert msg["error"]["code"] == "failed"

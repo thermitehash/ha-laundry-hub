@@ -19,16 +19,19 @@ from homeassistant.helpers import selector
 import probatio as vol
 
 from .const import (
+    CONF_AI_TASK_ENTITY,
     CONF_COLOR,
     CONF_DELETE,
     CONF_FEEDBACK_TIMEOUT,
     CONF_FLASH_DURATION,
+    CONF_FOLLOW_HA_THEME,
     CONF_LIGHT_ENTITY,
     CONF_MISSING_AFTER,
     CONF_NAME,
     CONF_NOTIFY_TARGET,
     CONF_ORDER,
     CONF_STATION_DEVICES,
+    CONF_WARDROBE_ENABLED,
     DEFAULT_FEEDBACK_TIMEOUT,
     DEFAULT_FLASH_DURATION,
     DEFAULT_MISSING_AFTER,
@@ -115,6 +118,22 @@ def settings_schema(defaults: dict[str, Any]) -> vol.Schema:
         if notify_default
         else vol.Optional(CONF_NOTIFY_TARGET)
     ] = selector.TextSelector()
+    fields[
+        vol.Required(
+            CONF_WARDROBE_ENABLED, default=bool(defaults.get(CONF_WARDROBE_ENABLED))
+        )
+    ] = selector.BooleanSelector()
+    ai_default = defaults.get(CONF_AI_TASK_ENTITY)
+    fields[
+        vol.Optional(CONF_AI_TASK_ENTITY, description={"suggested_value": ai_default})
+        if ai_default
+        else vol.Optional(CONF_AI_TASK_ENTITY)
+    ] = selector.EntitySelector(selector.EntitySelectorConfig(domain="ai_task"))
+    fields[
+        vol.Required(
+            CONF_FOLLOW_HA_THEME, default=bool(defaults.get(CONF_FOLLOW_HA_THEME))
+        )
+    ] = selector.BooleanSelector()
     return vol.Schema(fields)
 
 
@@ -142,7 +161,13 @@ def validate_settings(
         CONF_FLASH_DURATION: int(user_input[CONF_FLASH_DURATION]),
         CONF_MISSING_AFTER: int(user_input[CONF_MISSING_AFTER]),
         CONF_NOTIFY_TARGET: target or None,
+        CONF_WARDROBE_ENABLED: bool(user_input.get(CONF_WARDROBE_ENABLED, False)),
+        CONF_AI_TASK_ENTITY: user_input.get(CONF_AI_TASK_ENTITY) or None,
+        CONF_FOLLOW_HA_THEME: bool(user_input.get(CONF_FOLLOW_HA_THEME, False)),
     }
+    ai_entity = user_input.get(CONF_AI_TASK_ENTITY) or None
+    if ai_entity and hass.states.get(str(ai_entity)) is None:
+        errors[CONF_AI_TASK_ENTITY] = "ai_entity_not_found"
     return options, errors
 
 

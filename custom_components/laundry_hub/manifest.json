@@ -1,15 +1,29 @@
 {
   "domain": "laundry_hub",
   "name": "Laundry Hub",
-  "after_dependencies": ["esphome", "light", "notify", "person"],
-  "codeowners": ["@thermitehash"],
+  "after_dependencies": [
+    "ai_task",
+    "esphome",
+    "light",
+    "media_source",
+    "notify",
+    "person"
+  ],
+  "codeowners": [
+    "@thermitehash"
+  ],
   "config_flow": true,
-  "dependencies": ["frontend", "http", "panel_custom", "websocket_api"],
+  "dependencies": [
+    "frontend",
+    "http",
+    "panel_custom",
+    "websocket_api"
+  ],
   "documentation": "https://github.com/thermitehash/ha-laundry-hub",
   "integration_type": "hub",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/thermitehash/ha-laundry-hub/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "0.1.2"
+  "version": "0.2.0"
 }
