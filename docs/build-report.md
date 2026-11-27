@@ -1,8 +1,11 @@
 # Laundry Hub build report: v0.2.0
 - Version: 0.2.0 / Date: 2026-11-27 / Repo: https://github.com/thermitehash/ha-laundry-hub
 - PR: https://github.com/thermitehash/ha-laundry-hub/pull/3 (not merged)
-- Commit: @@COMMIT@@
-- CI: @@CI@@
+- Commit: `f2d691b` (v0.2.0 code), CI verified on `9277f46` (code + report draft); this report is committed on top as a docs-only commit
+- CI: workflow **Validate**, run 46078028297 on `9277f46`: all 15 ✅
+  - Version consistency ✅ · Version bump ✅ (0.2.0 > 0.1.2) · lint (ruff, mypy --strict, yamllint) ✅
+  - tests (ubuntu) ✅ · tests (macOS) ✅ · mutation ✅ · panel (Playwright, screenshots artifact) ✅
+  - firmware-host-tests ubuntu/macOS ✅ · esphome compile st25r_i2c/rc522 × ubuntu/macOS ✅ · hassfest ✅ · hacs ✅
 - Release: `v0.2.0` is tagged automatically by the Release workflow (wired to `workflow_run: [Validate]`) once Validate passes on `main` after merge.
 
 ## Summary
