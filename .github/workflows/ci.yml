@@ -1,4 +1,7 @@
-name: CI
+name: Validate
+
+# Release.yml listens for this workflow by name (workflow_run: [Validate]).
+# Renaming it silently stops releases.
 
 on:
   push:
@@ -8,7 +11,8 @@ on:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel runs on main: a cancelled run would skip that commit's release.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -29,13 +33,37 @@ jobs:
           cache-dependency-path: requirements_test.txt
       - run: pip install -r requirements_test.txt
       - name: ruff check
-        run: ruff check custom_components tests scripts
+        run: ruff check custom_components tests script
       - name: ruff format
-        run: ruff format --check custom_components tests scripts
+        run: ruff format --check custom_components tests script
       - name: mypy --strict
         run: mypy --strict
       - name: yamllint
         run: yamllint .
+
+  versions:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: manifest == const.py == pyproject == firmware_version; release notes exist
+        run: python script/check_versions.py
+
+  version:
+    name: Version bump
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: python script/check_version_bump.py "origin/${{ github.base_ref }}"
 
   tests:
     strategy:
@@ -75,7 +103,7 @@ jobs:
           mutmut results || true
           mutmut export-cicd-stats
       - name: Mutation score gate (>= 85%)
-        run: python scripts/mutation_gate.py 85
+        run: python script/mutation_gate.py 85
 
   panel:
     # Playwright 1.56 has no browser builds for ubuntu-latest (26.04) yet.

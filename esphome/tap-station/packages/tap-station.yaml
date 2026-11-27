@@ -5,6 +5,9 @@
 # Device files set: station_id, device_name, friendly_name and optionally reader.
 
 substitutions:
+  # Firmware is not released separately; it tracks the integration version
+  # (custom_components/laundry_hub/manifest.json), checked in CI.
+  firmware_version: "0.1.2"
   reader: st25r_i2c            # st25r_i2c | rc522
   # Where the st25r_i2c external component lives. "components" = next to the
   # device YAML. Use github://thermitehash/ha-laundry-hub/esphome/tap-station/components@main
@@ -26,7 +29,7 @@ esphome:
   comment: "Laundry Hub tap station (${station_id})"
   project:
     name: thermitehash.laundry-hub-tap-station
-    version: "0.1.0"
+    version: ${firmware_version}
   on_boot:
     priority: -100
     then:
