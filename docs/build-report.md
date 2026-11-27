@@ -2,9 +2,21 @@
 - Version: 0.1.2 (release versioning; no behaviour change)
 - Date: 2026-11-27
 - Repo: https://github.com/thermitehash/ha-laundry-hub
-- PR: @@PR@@ (branch `claude/laundry-hub-build-rmcoqp`, not merged). v0.1.1 was merged in PR #1 (`0d2dc89`).
-- Commit: @@COMMIT@@
-- CI (per job): @@CI@@
+- PR: https://github.com/thermitehash/ha-laundry-hub/pull/2 (branch `claude/laundry-hub-build-rmcoqp`, not merged). v0.1.1 was merged in PR #1 (`0d2dc89`).
+- Commit: `bdc2cc1` (last code change, all CI green); this report is committed on top as a docs-only commit
+- CI (per job), workflow **Validate**, run 46066911209 on `bdc2cc1`: all 15 ✅
+  - Version consistency ✅ · Version bump ✅ (0.1.2 > 0.1.1 on `main`)
+  - lint (ruff, ruff format, mypy --strict, yamllint) ✅
+  - tests (ubuntu-latest) ✅ · tests (macos-latest) ✅
+  - mutation ✅
+  - panel ✅
+  - firmware-host-tests (ubuntu-latest) ✅ · (macos-latest) ✅
+  - esphome (ubuntu-latest, st25r_i2c) ✅ · (ubuntu-latest, rc522) ✅
+  - esphome (macos-latest, st25r_i2c) ✅ · (macos-latest, rc522) ✅
+  - hassfest ✅
+  - hacs ✅
+  - Release workflow: not run on the PR (`workflow_run` only fires from the default branch); first runs after merge
+  - Previous merge (v0.1.1, `0d2dc89`) on `main`: all 13 ✅, including the full HACS license check
 
 ## Release versioning (0.1.2)
 - **The first release, v0.1.2, is created automatically on merge.** The **Release** workflow (`.github/workflows/release.yml`) is wired to `workflow_run: workflows: [Validate]`, and **`Validate`** is the exact `name:` of this repo's main CI workflow (`.github/workflows/ci.yml`, renamed from `CI` to match the other repos). When Validate passes for a `push` to `main`, Release checks out that run's `head_sha`, reads `manifest.json` → `0.1.2`, and runs `gh release create v0.1.2 --target <sha>`. The title and notes come from `docs/releases/v0.1.2.md`.
