@@ -5,7 +5,7 @@ tracking and laundry sorting lights. Tap a tagged garment on a station and Laund
 works out where it goes next. The matching wash bin or dry zone lights up on a WLED strip,
 and the station's LED confirms the tap.
 
-> **Status: v0.1.1, unverified on hardware.** Everything is built and tested against fakes
+> **Status: v0.1.2, unverified on hardware.** Everything is built and tested against fakes
 > (see [`docs/build-report.md`](docs/build-report.md)). Stations, readers, tags and WLED
 > have not been tested on real hardware yet.
 
@@ -157,12 +157,24 @@ up to 2 MB). Diagnostics redact names, owners, notes, tag UIDs and notify target
 Delete the integration under **Settings → Devices & services → Laundry Hub**, remove it
 in HACS, and optionally delete `/config/.storage/laundry_hub` and `/config/laundry_hub/`.
 
+## Releases and versions
+
+`custom_components/laundry_hub/manifest.json` → `version` is the single source of truth.
+`const.py`, `pyproject.toml` and the firmware's `firmware_version` must match it (CI checks this).
+
+To release, bump all four in a PR that also adds `docs/releases/v<version>.md` (line 1:
+`# v<version>: <short title>`, then plain-language bullets). A PR that changes
+`custom_components/` or `esphome/` fails CI unless it raises the version. After merge, the
+**Release** workflow runs when **Validate** passes on `main` and publishes the GitHub release
+`v<version>` from that exact commit. If that version was already released, it does nothing.
+Never tag by hand.
+
 ## Development
 
 ```bash
 pip install -r requirements_test.txt
 pytest tests --cov            # 90 % coverage gate
 ruff check . && mypy --strict && yamllint .
-mutmut run && mutmut export-cicd-stats && python scripts/mutation_gate.py
+mutmut run && mutmut export-cicd-stats && python script/mutation_gate.py
 make -C esphome/tap-station/tests
 ```

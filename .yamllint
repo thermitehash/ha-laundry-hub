@@ -7,6 +7,9 @@ ignore: |
 rules:
   line-length:
     max: 120
+    # Copied verbatim from thermitehash/ha-kroger-restock (only the manifest path changed).
+    ignore: |
+      .github/workflows/release.yml
   document-start: disable
   truthy:
     allowed-values: ["true", "false", "on", "off"]

@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "laundry_hub"
 NAME: Final = "Laundry Hub"
-VERSION: Final = "0.1.1"
+VERSION: Final = "0.1.2"
 
 # Event fired by the tap stations (ESPHome `homeassistant.event`).
 TAP_EVENT: Final = "esphome.laundry_tap"

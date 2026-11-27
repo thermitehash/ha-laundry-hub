@@ -1,21 +1,24 @@
 # Laundry Hub build report
-- Version: 0.1.1 (0.1.0 plus the owner decisions below)
+- Version: 0.1.2 (release versioning; no behaviour change)
 - Date: 2026-11-27
 - Repo: https://github.com/thermitehash/ha-laundry-hub
-- PR: https://github.com/thermitehash/ha-laundry-hub/pull/1 (branch `claude/laundry-hub-build-rmcoqp`, not merged)
-- Commit: `8aaf09b` (last code change, all CI green); this report is committed on top as a docs-only commit
-- CI (per job), run 46061942809 on `8aaf09b`: all 13 ✅
-  - lint (ruff, ruff format, mypy --strict, yamllint) ✅
-  - tests (ubuntu-latest) ✅ · tests (macos-latest) ✅
-  - mutation ✅
-  - panel ✅
-  - firmware-host-tests (ubuntu-latest) ✅ · (macos-latest) ✅
-  - esphome (ubuntu-latest, st25r_i2c) ✅ · (ubuntu-latest, rc522) ✅
-  - esphome (macos-latest, st25r_i2c) ✅ · (macos-latest, rc522) ✅
-  - hassfest ✅
-  - hacs ✅ (topics validated; license check runs on `main`, see Open question 9)
+- PR: @@PR@@ (branch `claude/laundry-hub-build-rmcoqp`, not merged). v0.1.1 was merged in PR #1 (`0d2dc89`).
+- Commit: @@COMMIT@@
+- CI (per job): @@CI@@
 
-## Owner decisions applied in 0.1.1
+## Release versioning (0.1.2)
+- **The first release, v0.1.2, is created automatically on merge.** The **Release** workflow (`.github/workflows/release.yml`) is wired to `workflow_run: workflows: [Validate]`, and **`Validate`** is the exact `name:` of this repo's main CI workflow (`.github/workflows/ci.yml`, renamed from `CI` to match the other repos). When Validate passes for a `push` to `main`, Release checks out that run's `head_sha`, reads `manifest.json` → `0.1.2`, and runs `gh release create v0.1.2 --target <sha>`. The title and notes come from `docs/releases/v0.1.2.md`.
+- **Copied pattern:** `release.yml` is thermitehash/ha-kroger-restock's file with only the manifest path changed (`kroger_restock` → `laundry_hub`), verified with `diff`. Trigger, `permissions: contents: write`, `concurrency: release` (no cancel), the job guard (dispatch, or a successful run of a `push` event), the `head_sha` checkout, the already-released → exit 0 rule, and the notes fallback to `--generate-notes` are all unchanged. It creates no draft or prerelease, and nothing is chained off the release event.
+- **The tag is `v` + the manifest version exactly** (`v0.1.2` ↔ `"0.1.2"`), so the version HACS offers and the version HA shows agree.
+- **One source of truth:** `manifest.json` → `version`. `script/check_versions.py` (CI job **Version consistency**, every event) fails unless `const.py` `VERSION`, `pyproject.toml` `[project].version` and the ESPHome `firmware_version` substitution all equal it. It also fails if `docs/releases/v<version>.md` is missing or doesn't start with `# v<version>: `.
+- **Version bump on PRs:** `script/check_version_bump.py`, ported from thermitehash/aiochainway, in CI job **Version bump** (`pull_request` only, `fetch-depth: 0`, `python script/check_version_bump.py "origin/${{ github.base_ref }}"`). A PR that changes `custom_components/` or `esphome/` must raise the manifest version above both the base branch's manifest and the latest `v*` tag, compared as versions, not strings. Docs-only and CI-only PRs are exempt, including Markdown files inside those folders. The failure message names the version to beat and the files to bump.
+- **Firmware:** `esphome.project.version: ${firmware_version}` (substitution, `"0.1.2"`). It tracks the integration version and is not released separately. The release notes say to reflash the stations.
+- **hacs.json:** unchanged. `render_readme: true`, no `zip_release` (HACS downloads the tagged source), and `homeassistant: 2026.10.0`, the true minimum (`probatio`).
+- **Release notes:** `docs/releases/v0.1.0.md`, `v0.1.1.md` and `v0.1.2.md`, in Kroger Restock's format.
+- **Cannot be tested on the PR:** `workflow_run` only fires for workflow files on the default branch. The Release workflow therefore first runs after merge. If it doesn't fire, run it once by hand (Actions → Release → Run workflow); it releases the manifest version on `main` and does nothing if that tag already exists.
+- **CI on `main` is never cancelled** (`cancel-in-progress` only for PRs), so no commit on `main` loses its Validate run, and with it its release.
+
+## Owner decisions applied in 0.1.1 (kept)
 1. License: MIT kept.
 2. Repeat tap restarts the 5-minute window: kept (current behaviour).
 3. **Changed:** a laundry tap in auto mode on a `drying` garment now stays `drying` and re-flashes its dry zone, whatever the time. Rewashing needs mode `sort`. State machine, README table, tests and the mutation check were updated.
@@ -67,6 +70,11 @@ Built in one pass against fakes, with no hardware on site. **Nothing is verified
 19. **ESP-IDF framework** on the AtomS3 (ESPHome's default for ESP32-S3).
 20. **License: MIT** (HACS requires one; confirmed by owner).
 21. **Panel smoke test CI job pinned to `ubuntu-24.04`:** Playwright 1.56 has no Chromium build for `ubuntu-latest` (26.04).
+22. **(0.1.2) Firmware version tracks the integration version** and is part of the consistency check, so there is one version number everywhere.
+23. **(0.1.2) The bump check compares against both the base branch's manifest and the latest `v*` tag.** aiochainway compares against the tag only; the spec asked for the base branch, and checking both is stricter.
+24. **(0.1.2) Markdown files under `custom_components/` or `esphome/` don't need a bump** (docs-only exemption).
+25. **(0.1.2) Scripts moved from `scripts/` to `script/`**, matching the owner's other repos.
+26. **(0.1.2) `release.yml` is exempt from yamllint's line-length rule only**, so the copied file stays verbatim.
 
 ## Firmware (reader transport approach, upstream reuse vs vendored, pins, LED/button behaviour, events/actions)
 - **Transport approach:** ESPHome 2026.11's `st25r` has an abstract transport: five pure-virtual methods (`read_register`, `write_register`, `write_command`, `write_fifo`, `read_fifo`), with `st25r_spi` as one implementation.
@@ -141,6 +149,7 @@ Built in one pass against fakes, with no hardware on site. **Nothing is verified
 Power: brightness limiter 5000 mA on a 6 A supply or 8500 mA on a 10 A supply; brightness cap of about 128. Full white is about 2 A/m. Details in `docs/wled.md`.
 
 ## Spec changes vs. this spec
+0. (0.1.2) Main CI workflow renamed `CI` → `Validate` so Release can listen for it by the same name as in the other repos.
 1. **Protocol header path:** `esphome/tap-station/components/st25r_i2c/st25r_i2c_proto.h` instead of `include/st25r_i2c_proto.h`. ESPHome copies only files directly inside an external component's directory into the build.
 2. **Added garment state `new`** (see Assumption 2).
 3. **Block-on-remove:** the subentry's Reconfigure → Delete path, the panel and the websocket path are blocked with a clear error. HA core's generic subentry delete button cannot be vetoed, so an in-use zone removed that way is **restored automatically**, with a repair issue that points to Bulk reassign.
@@ -158,11 +167,13 @@ Power: brightness limiter 5000 mA on a 6 A supply or 8500 mA on a 10 A supply; b
 6. **[hardware]** Are the PPS buttons ISO 14443A? An ISO 15693 tag will not be read by either reader configuration.
 7. ~~Repeat tap extends the window?~~ Resolved: yes (owner).
 8. ~~Drying + laundry tap = rewash?~~ Resolved: stays drying; rewash needs sort (owner, 0.1.1).
-9. HACS reads the license from the default branch, so the license check is skipped on PRs and runs on `main` after merge. Topics are set and now validated.
+9. HACS reads the license from the default branch (now on `main` since PR #1), so the license check is skipped on PRs and runs on `main` after merge. Topics are set and now validated.
 10. Real brand icons: `brand/*.png` stay placeholders for now (owner).
 
 ## Test results (tests, coverage, property tests, mutation score, firmware host tests, compile)
-- **pytest** (HA 2026.10.4, Python 3.14): 162 passed. Coverage 97.2 % (gate 90 %).
+- **pytest** (HA 2026.10.4, Python 3.14): 191 passed (162 integration + 29 release-script tests).
+  - Release-script tests: the repo itself is consistent; every mismatched copy, missing copy, missing notes file and bad notes title is reported; the bump check runs against real temporary git repos (docs/CI/tests/Markdown-only exempt, code or firmware change without a bump fails, a bump passes, 1.9.0 → 1.10.0 compares as versions, a downgrade fails, the version must also beat the latest tag, first release with no base manifest).
+- **(0.1.2)** `python script/check_versions.py` and `python script/check_version_bump.py origin/main` pass locally on this branch. Coverage 97.2 % (gate 90 %).
   - Covers every flow (config, options, wash bin and dry type subentries), seeding, block-on-remove (flow, websocket, restore after a generic delete), every state-machine transition, the repeat window, closet moves, unknown tags, missing detection with a frozen clock, flash / replacement / unavailable / missing / failing light, storage migration, quarantine and repair, websocket and action validation (bad UID, unknown subentry, duplicate UID, admin-only), and diagnostics redaction.
 - **Hypothesis:** 200 random sequences of up to 40 operations each. Operations: taps across stations and modes (including bogus modes and unknown tags), time jumps, enroll and remove, zone add, edit, remove and generic delete, reassign, set_location. After every step the test checks for no invalid state, no reference to a missing or wrong-type subentry, a consistent UID index, and every sensor equal to the catalog. Ran 3 × 200 locally.
 - **Mutation (mutmut 3.8.1, `statemachine.py`, rerun for 0.1.1):** 112/114 killed = **98.2 %** (target 85 %). The 2 survivors are equivalent mutants (`state` → `None` where `changed` is always true).
@@ -192,6 +203,11 @@ Self-review checklist:
 - Rapid taps: serialised by a lock, lights last-wins under their own lock. Tested with 5 taps in one loop iteration and concurrent flashes.
 - Timezones: everything is aware UTC; naive stored timestamps are quarantined; the repeat window is symmetric for small clock regressions. Tested.
 - Storage on restart: atomic writes, debounced plus a final write on stop and unload, quarantine and repair on load; HA core handles corrupt JSON. Tested.
+
+## After merging this PR
+1. Validate runs on `main`; when it passes, Release publishes **v0.1.2** (Actions → Release; Releases page). If Release does not run, start it once with *Run workflow*.
+2. In HACS, Laundry Hub should show **0.1.2** as available, matching `manifest.json`.
+3. Future releases: bump the version in a PR (all four places plus a new `docs/releases/v<version>.md`), then merge. Never tag by hand, and never change the version in a docs-only commit after a release.
 
 ## First-run checklist when hardware arrives
 1. Copy `esphome/tap-station/` into the ESPHome Device Builder and add the secrets (see `esphome/README.md`). Flash `laundry-room.yaml` over USB.
