@@ -143,7 +143,7 @@ Power: brightness limiter 5000 mA on a 6 A supply or 8500 mA on a 10 A supply; b
 6. **[hardware]** Are the PPS buttons ISO 14443A? An ISO 15693 tag will not be read by either reader configuration.
 7. Should a repeat tap extend the 5-minute window (current behaviour) or not?
 8. Should `drying` + laundry tap after 5 minutes mean rewash (current), or should it stay `drying`?
-9. Repository topics and description for HACS (`home-assistant`, `hacs`, `esphome`, `nfc`): the owner needs to set these in GitHub settings. The HACS action ignores `topics`, `brands` and `images` until then.
+9. HACS checks the license from the default branch, so on PRs the license check is skipped; it runs on `main` after merge. Repository topics and description for HACS (`home-assistant`, `hacs`, `esphome`, `nfc`): the owner needs to set these in GitHub settings. The HACS action ignores `topics`, `brands` and `images` until then.
 10. Real brand icons: `brand/*.png` are placeholders.
 
 ## Test results (tests, coverage, property tests, mutation score, firmware host tests, compile)

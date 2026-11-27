@@ -158,4 +158,8 @@ jobs:
         with:
           category: integration
           # Topics/images are repository settings the owner adds (see build report).
-          ignore: brands topics images
+          # HACS reads the license from GitHub's repo metadata (default branch only), so
+          # the LICENSE added in a PR can't pass until merged; main runs the full check.
+          ignore: >-
+            ${{ github.event_name == 'pull_request'
+                && 'brands topics images license' || 'brands topics images' }}
