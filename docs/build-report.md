@@ -50,6 +50,8 @@ Built in one pass against fakes, with no hardware on site. **Nothing is verified
     - The mode button acts on a single click of 30–800 ms.
     - Wi-Fi fallback AP plus captive portal.
 19. **ESP-IDF framework** on the AtomS3 (ESPHome's default for ESP32-S3).
+20. **License: MIT** (HACS requires one). The owner may change it.
+21. **Panel smoke test CI job pinned to `ubuntu-24.04`:** Playwright 1.56 has no Chromium build for `ubuntu-latest` (26.04).
 
 ## Firmware (reader transport approach, upstream reuse vs vendored, pins, LED/button behaviour, events/actions)
 - **Transport approach:** ESPHome 2026.11's `st25r` has an abstract transport: five pure-virtual methods (`read_register`, `write_register`, `write_command`, `write_fifo`, `read_fifo`), with `st25r_spi` as one implementation.
