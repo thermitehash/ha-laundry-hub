@@ -420,3 +420,20 @@ async def test_notify_throttle_map_pruned(hass: HomeAssistant, setup, freezer) -
     freezer.tick(timedelta(hours=2))
     await fire(hass, "laundry", uid="BB000000")
     assert list(hub._notified) == ["BB000000"]
+
+
+async def test_drying_stays_drying_in_auto(hass: HomeAssistant, setup, freezer) -> None:
+    """Owner decision (v0.1.1): auto never rewashes; sort does."""
+    hub, lights, feedback, _ = setup
+    await fire(hass, "laundry", mode="dry")
+    assert garment(hub).state == "drying"
+    freezer.tick(timedelta(hours=6))
+    await fire(hass, "laundry")
+    assert garment(hub).state == "drying"
+    assert lights["turn_on"][-1].data["entity_id"] == "light.dry_hang"
+    assert feedback[-1].data == {"result": "known"}
+    assert hass.states.get("event.laundry_hub_tap").attributes["repeat"] is True
+    await fire(hass, "laundry", mode="sort")
+    assert garment(hub).state == "in_wash"
+    assert lights["turn_on"][-1].data["entity_id"] == "light.sort_darks"
+    await hub.flash.async_stop()

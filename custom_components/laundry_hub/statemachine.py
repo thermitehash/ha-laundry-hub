@@ -113,11 +113,12 @@ def decide(tap: TapInput) -> Decision:
         return _laundry_step(tap.state, SUBENTRY_DRY_TYPE, repeat=False)
 
     # Auto mode (unknown modes are treated as auto by the caller).
-    recent = within_repeat_window(tap.last_laundry_tap, tap.now)
-    if recent and tap.state in (STATE_IN_WASH, STATE_DRYING):
-        zone = SUBENTRY_WASH_BIN if tap.state == STATE_IN_WASH else SUBENTRY_DRY_TYPE
-        return _laundry_step(tap.state, zone, repeat=True)
+    if tap.state == STATE_DRYING:
+        # Stays drying whatever the time: rewash needs mode sort.
+        return _laundry_step(tap.state, SUBENTRY_DRY_TYPE, repeat=True)
     if tap.state == STATE_IN_WASH:
+        if within_repeat_window(tap.last_laundry_tap, tap.now):
+            return _laundry_step(tap.state, SUBENTRY_WASH_BIN, repeat=True)
         return _laundry_step(tap.state, SUBENTRY_DRY_TYPE, repeat=False)
     return _laundry_step(tap.state, SUBENTRY_WASH_BIN, repeat=False)
 

@@ -5,7 +5,7 @@ tracking and laundry sorting lights. Tap a tagged garment on a station and Laund
 works out where it goes next. The matching wash bin or dry zone lights up on a WLED strip,
 and the station's LED confirms the tap.
 
-> **Status: v0.1.0, unverified on hardware.** Everything is built and tested against fakes
+> **Status: v0.1.1, unverified on hardware.** Everything is built and tested against fakes
 > (see [`docs/build-report.md`](docs/build-report.md)). Stations, readers, tags and WLED
 > have not been tested on real hardware yet.
 
@@ -13,10 +13,11 @@ and the station's LED confirms the tap.
 
 | Tap at…            | Garment was…                         | Result                                   | Light            |
 |--------------------|--------------------------------------|------------------------------------------|------------------|
-| Laundry (auto)     | not in the wash                      | → **in wash**                            | its wash bin     |
+| Laundry (auto)     | new or put away                      | → **in wash**                            | its wash bin     |
 | Laundry (auto)     | in wash, last laundry tap ≥ 5 min ago | → **drying**                            | its dry type     |
-| Laundry (auto)     | tapped at laundry < 5 min ago        | no change (repeat)                       | same zone again  |
-| Laundry (sort)     | anything                             | → **in wash**                            | its wash bin     |
+| Laundry (auto)     | in wash, last laundry tap < 5 min ago | no change (repeat)                      | its wash bin again |
+| Laundry (auto)     | drying (any time)                    | no change, stays drying                  | its dry type again |
+| Laundry (sort)     | anything (use this to rewash)        | → **in wash**                            | its wash bin     |
 | Laundry (dry)      | anything                             | → **drying**                             | its dry type     |
 | Closet 1 / 2       | anything                             | → **put away** in that closet            | –                |
 | Any                | unknown tag                          | recorded, enrollment notification sent   | –                |
@@ -24,6 +25,8 @@ and the station's LED confirms the tap.
 Station LED: green = known, blue = unknown, red = error, white = moved to a closet,
 amber = Home Assistant did not answer. Garments not seen for *missing after* days
 (default 14) are listed as **missing**. They are never deleted automatically.
+
+Every laundry-station tap, repeats included, restarts the 5-minute window.
 
 ## Installation (HACS)
 

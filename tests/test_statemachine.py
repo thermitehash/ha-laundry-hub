@@ -69,15 +69,32 @@ def dry(state: str, *, repeat: bool = False) -> Decision:
     )
 
 
-@pytest.mark.parametrize("state", [STATE_NEW, STATE_PUT_AWAY, STATE_DRYING])
+@pytest.mark.parametrize("state", [STATE_NEW, STATE_PUT_AWAY])
 def test_auto_not_in_wash_goes_to_wash(state: str) -> None:
-    location = {"new": None, "put_away": "closet_2", "drying": "laundry"}[state]
+    location = {"new": None, "put_away": "closet_2"}[state]
     assert tap(state=state, location=location) == wash(state)
 
 
-def test_auto_drying_old_tap_goes_back_to_wash() -> None:
-    last = NOW - REPEAT_WINDOW
-    assert tap(state=STATE_DRYING, location="laundry", last=last) == wash(STATE_DRYING)
+@pytest.mark.parametrize(
+    "last",
+    [
+        None,
+        NOW - REPEAT_WINDOW,
+        NOW - timedelta(days=3),
+        NOW + timedelta(hours=2),  # clock moved backwards a lot
+    ],
+)
+def test_auto_drying_stays_drying_regardless_of_time(last: datetime | None) -> None:
+    """Owner decision (v0.1.1): auto never rewashes a drying garment."""
+    assert tap(state=STATE_DRYING, location="laundry", last=last) == dry(
+        STATE_DRYING, repeat=True
+    )
+
+
+def test_sort_rewashes_drying_garment() -> None:
+    result = tap(mode=MODE_SORT, state=STATE_DRYING, location="laundry")
+    assert result == wash(STATE_DRYING)
+    assert result.changed is True
 
 
 def test_auto_in_wash_after_window_goes_to_dry() -> None:
