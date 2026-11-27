@@ -491,3 +491,45 @@ async def test_store_keeps_unknown_top_level_keys(hass: HomeAssistant) -> None:
     await catalog.async_flush()
     saved = await Store(hass, 3, DOMAIN, minor_version=2).async_load()
     assert saved["from_the_future"] == {"x": 1} and saved["purchases"] == {}
+
+
+async def test_repair_flow_generic_imap(hass: HomeAssistant) -> None:
+    from homeassistant.components.repairs import DOMAIN as REPAIRS  # noqa: PLC0415
+    from homeassistant.helpers import issue_registry as ir  # noqa: PLC0415
+    from homeassistant.setup import async_setup_component  # noqa: PLC0415
+
+    from custom_components.laundry_hub.const import (  # noqa: PLC0415
+        ISSUE_PURCHASE_AUTH,
+    )
+
+    server = FakeImap({}, password="new", folder="INBOX")
+    account = {
+        **ACCOUNT,
+        "provider": "imap",
+        "host": "imap.example.com",
+        "port": 993,
+        "folder": "INBOX",
+    }
+    with patch.object(mailbox, "_create_client", server):
+        hub = await setup_hub(hass, data={"purchase_email": account})
+        hub.purchases._raise_auth_issue()  # noqa: SLF001
+        assert await async_setup_component(hass, "repairs", {})
+        manager = hass.data[REPAIRS]["flow_manager"]
+        flow = await manager.async_init(DOMAIN, data={"issue_id": ISSUE_PURCHASE_AUTH})
+        flow = await manager.async_configure(
+            flow["flow_id"], {"email": ADDRESS, "password": "new", "provider": "imap"}
+        )
+        assert flow["step_id"] == "email_server"
+        flow = await manager.async_configure(
+            flow["flow_id"], {"host": "imap.example.com", "port": 993, "folder": "Nope"}
+        )
+        assert flow["errors"] == {"base": "folder_not_found"}
+        flow = await manager.async_configure(
+            flow["flow_id"],
+            {"host": "imap.example.com", "port": 993, "folder": "INBOX"},
+        )
+        assert flow["type"] == "create_entry"
+        await hass.async_block_till_done()
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    assert entry.data["purchase_email"]["password"] == "new"
+    assert ir.async_get(hass).async_get_issue(DOMAIN, ISSUE_PURCHASE_AUTH) is None
