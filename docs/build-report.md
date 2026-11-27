@@ -3,8 +3,17 @@
 - Date: 2026-11-27
 - Repo: https://github.com/thermitehash/ha-laundry-hub
 - PR: https://github.com/thermitehash/ha-laundry-hub/pull/1 (branch `claude/laundry-hub-build-rmcoqp`, not merged)
-- Commit: @@COMMIT@@
-- CI (per job): @@CI@@
+- Commit: `8aaf09b` (last code change, all CI green); this report is committed on top as a docs-only commit
+- CI (per job), run 46061942809 on `8aaf09b`: all 13 ✅
+  - lint (ruff, ruff format, mypy --strict, yamllint) ✅
+  - tests (ubuntu-latest) ✅ · tests (macos-latest) ✅
+  - mutation ✅
+  - panel ✅
+  - firmware-host-tests (ubuntu-latest) ✅ · (macos-latest) ✅
+  - esphome (ubuntu-latest, st25r_i2c) ✅ · (ubuntu-latest, rc522) ✅
+  - esphome (macos-latest, st25r_i2c) ✅ · (macos-latest, rc522) ✅
+  - hassfest ✅
+  - hacs ✅ (topics validated; license check runs on `main`, see Open question 9)
 
 ## Owner decisions applied in 0.1.1
 1. License: MIT kept.
