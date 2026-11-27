@@ -1,0 +1,165 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.14"
+  ESPHOME_VERSION: "2026.11.1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements_test.txt
+      - run: pip install -r requirements_test.txt
+      - name: ruff check
+        run: ruff check custom_components tests scripts
+      - name: ruff format
+        run: ruff format --check custom_components tests scripts
+      - name: mypy --strict
+        run: mypy --strict
+      - name: yamllint
+        run: yamllint .
+
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements_test.txt
+      - run: pip install -r requirements_test.txt
+      - name: pytest (coverage gate 90%, Hypothesis property tests)
+        run: python -m pytest tests -q --cov --cov-report=term-missing --cov-report=xml -p no:cacheprovider
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          name: coverage
+          path: coverage.xml
+
+  mutation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements_test.txt
+      - run: pip install -r requirements_test.txt
+      - name: mutmut (state machine)
+        run: |
+          mutmut run || true
+          mutmut results || true
+          mutmut export-cicd-stats
+      - name: Mutation score gate (>= 85%)
+        run: python scripts/mutation_gate.py 85
+
+  panel:
+    # Playwright 1.56 has no browser builds for ubuntu-latest (26.04) yet.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-save playwright@1.56.1 && npx playwright install --with-deps chromium
+      - run: node tests/panel/smoke.mjs
+
+  firmware-host-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Protocol header host tests (-Wall -Wextra -Werror, ASan/UBSan)
+        run: make -C esphome/tap-station/tests test CXX=c++
+
+  esphome:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        reader: [st25r_i2c, rc522]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: esphome/tap-station
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install esphome==${{ env.ESPHOME_VERSION }}
+      - name: Dummy secrets
+        run: |
+          cp secrets.yaml.example secrets.yaml
+          KEY=$(python -c 'import base64,os;print(base64.b64encode(os.urandom(32)).decode())')
+          sed -i.bak "s|REPLACE_WITH_32_BYTE_BASE64_KEY=|$KEY|" secrets.yaml
+      - name: esphome config (all stations)
+        run: |
+          for f in laundry-room closet-1 closet-2; do
+            esphome -s reader ${{ matrix.reader }} config $f.yaml > /dev/null
+            echo "$f (${{ matrix.reader }}): config OK"
+          done
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/esphome
+            ~/.platformio
+            esphome/tap-station/.esphome/build
+          key: >-
+            esphome-${{ matrix.os }}-${{ env.ESPHOME_VERSION }}-${{ matrix.reader }}-${{
+            hashFiles('esphome/tap-station/**/*.yaml', 'esphome/tap-station/components/**') }}
+          restore-keys: |
+            esphome-${{ matrix.os }}-${{ env.ESPHOME_VERSION }}-${{ matrix.reader }}-
+            esphome-${{ matrix.os }}-${{ env.ESPHOME_VERSION }}-
+      - name: esphome compile (laundry station, ${{ matrix.reader }})
+        run: esphome -s reader ${{ matrix.reader }} compile laundry-room.yaml
+      - name: esphome compile (closet station, ${{ matrix.reader }})
+        if: matrix.os == 'ubuntu-latest'
+        run: esphome -s reader ${{ matrix.reader }} compile closet-1.yaml
+
+  hassfest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: home-assistant/actions/hassfest@master
+
+  hacs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hacs/action@main
+        with:
+          category: integration
+          # Brand icons are placeholders and README screenshots come later.
+          # HACS reads the license from GitHub's repo metadata (default branch only), so
+          # the LICENSE added in a PR can't pass until merged; main runs the full check.
+          ignore: >-
+            ${{ github.event_name == 'pull_request'
+                && 'brands images license' || 'brands images' }}

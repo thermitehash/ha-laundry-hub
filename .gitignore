@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+mutants/
+.hypothesis/
+esphome/tap-station/secrets.yaml
+esphome/tap-station/.esphome/
+esphome/tap-station/tests/test_st25r_i2c_proto
+node_modules/
+.venv/

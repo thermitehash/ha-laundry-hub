@@ -1,0 +1,17 @@
+# Unit NFC (U216): ST25R3916 over I2C via the st25r_i2c external component.
+external_components:
+  - source: ${nfc_component_source}
+    components: [st25r_i2c]
+
+st25r_i2c:
+  id: nfc_reader
+  i2c_id: grove_i2c
+  address: 0x50
+  update_interval: 250ms
+  rf_power: 15
+  max_backoff: 60s
+  on_tag:
+    then:
+      - script.execute:
+          id: handle_tag
+          raw_uid: !lambda "return x;"

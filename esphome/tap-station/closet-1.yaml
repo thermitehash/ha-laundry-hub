@@ -1,0 +1,9 @@
+# Laundry Hub tap station: Closet 1 tap
+substitutions:
+  device_name: closet-1
+  friendly_name: Closet 1 tap
+  station_id: closet_1
+  reader: st25r_i2c   # or rc522 for the Unit RFID2 fallback
+
+packages:
+  tap_station: !include packages/tap-station.yaml

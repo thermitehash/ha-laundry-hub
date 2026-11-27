@@ -1,0 +1,10 @@
+{
+  "services": {
+    "enroll_garment": {"service": "mdi:tag-plus"},
+    "update_garment": {"service": "mdi:tag-edit"},
+    "remove_garment": {"service": "mdi:tag-remove"},
+    "set_location": {"service": "mdi:map-marker"},
+    "reassign": {"service": "mdi:swap-horizontal"},
+    "flash_zone": {"service": "mdi:led-strip-variant"}
+  }
+}
