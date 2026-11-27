@@ -13,7 +13,9 @@ if TYPE_CHECKING:
     from . import LaundryHubConfigEntry
 
 TO_REDACT_OPTIONS = {CONF_NOTIFY_TARGET, CONF_STATION_DEVICES}
-TO_REDACT_GARMENT = {"name", "owner", "notes", "photo", "uids"}
+TO_REDACT_GARMENT = {
+    "name", "owner", "notes", "photo", "photos", "uids", "purchase", "brand_size_note",
+}  # fmt: skip
 
 
 def _mask_uid(uid: str) -> str:
@@ -29,6 +31,7 @@ async def async_get_config_entry_diagnostics(
         {
             **async_redact_data(g.to_dict(), TO_REDACT_GARMENT),
             "tag_count": len(g.uids),
+            "photo_count": len(g.photos),
             "missing": hub.is_missing(g),
         }
         for g in hub.catalog.garments.values()
@@ -52,4 +55,7 @@ async def async_get_config_entry_diagnostics(
         "quarantined_records": len(hub.catalog.quarantine),
         "invariant_problems": hub.problems(),
         "current_flash": hub.flash.current,
+        "wardrobe_enabled": hub.wardrobe.enabled,
+        "ai_entity_configured": bool(hub.wardrobe.ai_entity),
+        "station_health": hub.station_health(),
     }

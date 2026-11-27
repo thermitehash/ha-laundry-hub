@@ -9,9 +9,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import EVENT_TYPES
+from .const import EVENT_TYPES, SIGNAL_TAP
 from .entity import LaundryHubEntity
-from .hub import SIGNAL_TAP
 
 if TYPE_CHECKING:
     from . import LaundryHubConfigEntry

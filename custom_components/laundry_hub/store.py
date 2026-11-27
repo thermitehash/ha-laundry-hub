@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import copy
 from datetime import datetime
+import json
 import logging
+from pathlib import Path
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -25,7 +28,8 @@ from .const import (
     STORAGE_VERSION,
     STORED_STATES,
 )
-from .models import Garment, normalize_uid
+from .models import MAX_RECENT_TAPS, Garment, normalize_uid
+from .taxonomy import remap_description
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -127,6 +131,55 @@ def sanitize_garment(garment: Garment) -> list[str]:
     return fixes
 
 
+def migrate_v2(old: dict[str, Any]) -> dict[str, Any]:
+    """Migrate the v2 schema (v0.1.x) to v3 (v0.2): lossless.
+
+    The single ``photo`` becomes ``photos[0]``; every new field gets its empty
+    default; unknown keys are kept. Owner settings and station health start empty.
+    """
+    garments: dict[str, Any] = {}
+    for gid, item in (old.get("garments") or {}).items():
+        if not isinstance(item, dict):
+            garments[gid] = item  # quarantined on load, never dropped here
+            continue
+        new = dict(item)
+        photo = new.pop("photo", None)
+        new.setdefault("photos", [photo] if photo else [])
+        for key, default in V3_GARMENT_DEFAULTS.items():
+            new.setdefault(key, copy.deepcopy(default))
+        garments[gid] = new
+    data = {**old, "garments": garments}
+    data.setdefault("owners", {})
+    data.setdefault("stations", {})
+    return data
+
+
+# New v3 garment keys and their defaults ("reserved" = stored only, used in v0.3).
+V3_GARMENT_DEFAULTS: dict[str, Any] = {
+    "brand": None,
+    "size": None,
+    "purchase": None,
+    "description": None,
+    "description_provenance": {},
+    "description_confidence": {},
+    "description_ai": {},
+    "description_model": None,
+    "description_updated": None,
+    "wear_for": "any",
+    "uniform": False,
+    "recent_taps": [],
+    "lifecycle": "active",
+    "lifecycle_changed": None,
+    "sale_price": None,
+    "wear_log": [],  # reserved
+    "out_since": None,  # reserved
+    "fit_feedback": [],  # reserved
+    "fit_score": None,  # reserved, internal only
+    "skip_count": 0,  # reserved
+    "last_suggested": None,  # reserved
+}
+
+
 class _CatalogStore(Store[dict[str, Any]]):
     async def _async_migrate_func(
         self,
@@ -134,10 +187,33 @@ class _CatalogStore(Store[dict[str, Any]]):
         old_minor_version: int,
         old_data: dict[str, Any],
     ) -> dict[str, Any]:
+        await self._async_backup(old_major_version, old_minor_version, old_data)
         data = old_data
         if old_major_version < 2:
             data = migrate_v1(data)
+        if old_major_version < 3:
+            data = migrate_v2(data)
         return data
+
+    async def _async_backup(
+        self, major: int, minor: int, old_data: dict[str, Any]
+    ) -> None:
+        """Keep the pre-migration file so a downgrade can be rolled back."""
+        path = Path(self.hass.config.path(".storage", f"{self.key}.v{major}.backup"))
+        payload = {"version": major, "minor_version": minor, "key": self.key}
+        payload["data"] = old_data
+        try:
+            await self.hass.async_add_executor_job(_write_json, path, payload)
+        except OSError as err:  # pragma: no cover - disk errors
+            _LOGGER.warning("Could not write storage backup %s: %s", path, err)
+        else:
+            _LOGGER.info("Backed up v%s Laundry Hub storage to %s", major, path)
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():  # never overwrite an earlier backup
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 class Catalog:
@@ -153,6 +229,8 @@ class Catalog:
         self.last_unknown: dict[str, Any] | None = None
         self.unknown_tags: dict[str, dict[str, Any]] = {}
         self.quarantine: list[Any] = []
+        self.owners: dict[str, dict[str, Any]] = {}
+        self.stations: dict[str, dict[str, Any]] = {}
 
     async def async_load(self) -> None:
         """Load and validate stored data; malformed records are quarantined."""
@@ -185,6 +263,13 @@ class Catalog:
         self.last_unknown = last_unknown if isinstance(last_unknown, dict) else None
         unknown = data.get("unknown_tags")
         self.unknown_tags = unknown if isinstance(unknown, dict) else {}
+        owners = data.get("owners")
+        self.owners = owners if isinstance(owners, dict) else {}
+        stations = data.get("stations")
+        self.stations = stations if isinstance(stations, dict) else {}
+        for garment in self.garments.values():
+            if garment.description:
+                garment.description = remap_description(garment.description)
         # A tag enrolled since it was recorded as unknown is no longer unknown.
         for uid in list(self.unknown_tags):
             if uid in self.uid_index:
@@ -196,6 +281,8 @@ class Catalog:
             "last_unknown": self.last_unknown,
             "unknown_tags": self.unknown_tags,
             "quarantine": self.quarantine,
+            "owners": self.owners,
+            "stations": self.stations,
         }
 
     def schedule_save(self) -> None:
@@ -329,3 +416,28 @@ class Catalog:
         if self.last_unknown and self.last_unknown.get("uid") == uid:
             self.last_unknown = None
         self.schedule_save()
+
+    def owner_settings(self, owner: str) -> dict[str, Any]:
+        """Per-owner settings (work label; v0.3 fields reserved)."""
+        settings = self.owners.get(owner) or {}
+        return {
+            "work_label": settings.get("work_label") or "Work",
+            "body_profile": settings.get("body_profile"),  # reserved (v0.3)
+            "schedule": settings.get("schedule"),  # reserved (v0.3)
+        }
+
+    def set_owner_settings(self, owner: str, **changes: Any) -> dict[str, Any]:
+        """Update per-owner settings."""
+        settings = self.owner_settings(owner) | changes
+        self.owners[owner] = settings
+        self.schedule_save()
+        return settings
+
+    def record_station_tap(self, station: str, now: datetime) -> None:
+        """Remember when a station last sent a tap (station health)."""
+        self.stations[station] = {"last_tap": now.isoformat()}
+        self.schedule_save()
+
+    def record_garment_tap(self, garment: Garment, entry: dict[str, Any]) -> None:
+        """Append to a garment's recent taps (newest last, capped)."""
+        garment.recent_taps = [*garment.recent_taps, entry][-MAX_RECENT_TAPS:]

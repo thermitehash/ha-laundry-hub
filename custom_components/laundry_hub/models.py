@@ -60,9 +60,25 @@ class Zone:
     order: int
 
 
+# Keys written by to_dict(); anything else found in storage is kept in `extra`
+# so a round trip never loses data written by a newer or older version.
+_KNOWN_KEYS = frozenset(
+    {
+        "id", "uids", "name", "owner", "wash_bin", "dry_type", "notes", "photo",
+        "photos", "state", "location", "last_seen", "last_laundry_tap", "created",
+        "brand", "size", "purchase", "description", "description_provenance",
+        "description_confidence", "description_ai", "description_model",
+        "description_updated", "wear_for", "uniform", "recent_taps", "lifecycle",
+        "lifecycle_changed", "sale_price", "wear_log", "out_since", "fit_feedback",
+        "fit_score", "skip_count", "last_suggested",
+    }
+)  # fmt: skip
+MAX_RECENT_TAPS = 10
+
+
 @dataclass(slots=True)
 class Garment:
-    """A garment in the catalog."""
+    """A garment in the catalog (storage schema v3)."""
 
     id: str
     uids: list[str]
@@ -72,17 +88,46 @@ class Garment:
     created: datetime
     owner: str | None = None
     notes: str = ""
-    photo: str | None = None
+    photos: list[str] = field(default_factory=list)  # first = cover
     state: str = STATE_NEW
     location: str | None = None
     last_seen: datetime | None = None
     last_seen_station: str | None = None
     last_laundry_tap: datetime | None = None
+    # Wardrobe (v0.2, optional)
+    brand: str | None = None
+    size: dict[str, Any] | None = None  # {label, system, cut, brand_size_note}
+    purchase: dict[str, Any] | None = None  # see wardrobe.PURCHASE_KEYS
+    description: dict[str, Any] | None = None  # taxonomy.DESCRIPTION_FIELDS
+    description_provenance: dict[str, str] = field(default_factory=dict)
+    description_confidence: dict[str, float] = field(default_factory=dict)
+    description_ai: dict[str, Any] = field(default_factory=dict)  # last AI values
+    description_model: str | None = None
+    description_updated: datetime | None = None
+    wear_for: str = "any"
+    uniform: bool = False
+    recent_taps: list[dict[str, Any]] = field(default_factory=list)
+    lifecycle: str = "active"
+    lifecycle_changed: datetime | None = None
+    sale_price: float | None = None
+    # Reserved for v0.3 (stored, never used or shown in v0.2)
+    wear_log: list[Any] = field(default_factory=list)
+    out_since: datetime | None = None
+    fit_feedback: list[Any] = field(default_factory=list)
+    fit_score: float | None = None
+    skip_count: int = 0
+    last_suggested: datetime | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def photo(self) -> str | None:
+        """Cover photo filename (v0.1 compatibility)."""
+        return self.photos[0] if self.photos else None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for storage."""
         return {
+            **self.extra,
             "id": self.id,
             "uids": list(self.uids),
             "name": self.name,
@@ -90,7 +135,7 @@ class Garment:
             "wash_bin": self.wash_bin,
             "dry_type": self.dry_type,
             "notes": self.notes,
-            "photo": self.photo,
+            "photos": list(self.photos),
             "state": self.state,
             "location": self.location,
             "last_seen": (
@@ -98,10 +143,29 @@ class Garment:
                 if self.last_seen is not None
                 else None
             ),
-            "last_laundry_tap": (
-                self.last_laundry_tap.isoformat() if self.last_laundry_tap else None
-            ),
+            "last_laundry_tap": _iso(self.last_laundry_tap),
             "created": self.created.isoformat(),
+            "brand": self.brand,
+            "size": dict(self.size) if self.size else None,
+            "purchase": dict(self.purchase) if self.purchase else None,
+            "description": dict(self.description) if self.description else None,
+            "description_provenance": dict(self.description_provenance),
+            "description_confidence": dict(self.description_confidence),
+            "description_ai": dict(self.description_ai),
+            "description_model": self.description_model,
+            "description_updated": _iso(self.description_updated),
+            "wear_for": self.wear_for,
+            "uniform": self.uniform,
+            "recent_taps": [dict(t) for t in self.recent_taps],
+            "lifecycle": self.lifecycle,
+            "lifecycle_changed": _iso(self.lifecycle_changed),
+            "sale_price": self.sale_price,
+            "wear_log": list(self.wear_log),
+            "out_since": _iso(self.out_since),
+            "fit_feedback": list(self.fit_feedback),
+            "fit_score": self.fit_score,
+            "skip_count": self.skip_count,
+            "last_suggested": _iso(self.last_suggested),
         }
 
     @classmethod
@@ -110,6 +174,9 @@ class Garment:
         last_seen = data.get("last_seen") or None
         created = _dt(data["created"])
         assert created is not None
+        photos = data.get("photos")
+        if photos is None:  # v2 data that skipped migration
+            photos = [data["photo"]] if data.get("photo") else []
         return cls(
             id=str(data["id"]),
             uids=[normalize_uid(u) for u in data["uids"]],
@@ -118,14 +185,40 @@ class Garment:
             wash_bin=str(data["wash_bin"]),
             dry_type=str(data["dry_type"]),
             notes=str(data.get("notes") or ""),
-            photo=data.get("photo"),
+            photos=[str(p) for p in photos],
             state=str(data.get("state") or STATE_NEW),
             location=data.get("location"),
             last_seen=_dt(last_seen["time"]) if last_seen else None,
             last_seen_station=last_seen.get("station") if last_seen else None,
             last_laundry_tap=_dt(data.get("last_laundry_tap")),
             created=created,
+            brand=data.get("brand"),
+            size=data.get("size") or None,
+            purchase=data.get("purchase") or None,
+            description=data.get("description") or None,
+            description_provenance=dict(data.get("description_provenance") or {}),
+            description_confidence=dict(data.get("description_confidence") or {}),
+            description_ai=dict(data.get("description_ai") or {}),
+            description_model=data.get("description_model"),
+            description_updated=_dt(data.get("description_updated")),
+            wear_for=str(data.get("wear_for") or "any"),
+            uniform=bool(data.get("uniform", False)),
+            recent_taps=list(data.get("recent_taps") or [])[-MAX_RECENT_TAPS:],
+            lifecycle=str(data.get("lifecycle") or "active"),
+            lifecycle_changed=_dt(data.get("lifecycle_changed")),
+            sale_price=data.get("sale_price"),
+            wear_log=list(data.get("wear_log") or []),
+            out_since=_dt(data.get("out_since")),
+            fit_feedback=list(data.get("fit_feedback") or []),
+            fit_score=data.get("fit_score"),
+            skip_count=int(data.get("skip_count") or 0),
+            last_suggested=_dt(data.get("last_suggested")),
+            extra={k: v for k, v in data.items() if k not in _KNOWN_KEYS},
         )
+
+
+def _iso(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
 
 
 def garment_problems(garment: Garment, zone_ids: set[str]) -> list[str]:

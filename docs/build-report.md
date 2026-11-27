@@ -1,3 +1,138 @@
+# Laundry Hub build report: v0.2.0
+- Version: 0.2.0 / Date: 2026-11-27 / Repo: https://github.com/thermitehash/ha-laundry-hub
+- PR: https://github.com/thermitehash/ha-laundry-hub/pull/3 (not merged)
+- Commit: `f2d691b` (v0.2.0 code), CI verified on `9277f46` (code + report draft); this report is committed on top as a docs-only commit
+- CI: workflow **Validate**, run 46078028297 on `9277f46`: all 15 ✅
+  - Version consistency ✅ · Version bump ✅ (0.2.0 > 0.1.2) · lint (ruff, mypy --strict, yamllint) ✅
+  - tests (ubuntu) ✅ · tests (macOS) ✅ · mutation ✅ · panel (Playwright, screenshots artifact) ✅
+  - firmware-host-tests ubuntu/macOS ✅ · esphome compile st25r_i2c/rc522 × ubuntu/macOS ✅ · hassfest ✅ · hacs ✅
+- Release: `v0.2.0` is tagged automatically by the Release workflow (wired to `workflow_run: [Validate]`) once Validate passes on `main` after merge.
+
+## Summary
+- **Wardrobe catalog (optional, off by default):** purchase details, structured sizes, up to 8 photos per garment, product URL import, and AI descriptions from a fixed taxonomy. This lays the groundwork for wear tracking (v0.3) and outfit suggestions (v0.4).
+- **Phone-first panel redesign:** Home, Closet, Add and Settings tabs, plus a garment detail sheet. Live updates, light/dark from HA, and the Linen & Teal palette from shared `tokens.css`.
+- With Wardrobe off, v0.1.2 behaviour is unchanged.
+
+## What shipped
+- **1.1 Feature switch:** options `wardrobe_enabled` (off), `ai_task_entity` (`ai_task` entity selector, validated) and `follow_ha_theme` (off). When off, wardrobe commands refuse with `wardrobe_disabled`, and no AI calls or network fetches happen.
+- **1.2 Model / Store v3:**
+  - New fields: `photos[]`, `brand`, `size` (label, system, cut, note), nested `purchase` (store, date, price, currency, link, order ref, source), `description` plus per-field `description_provenance`, `description_confidence`, `description_ai`, `description_model`, `description_updated`.
+  - Wear context: `wear_for`, `uniform` (uniform forces `wear_for = work`).
+  - `recent_taps` (last 10), `lifecycle` plus `lifecycle_changed` and `sale_price`.
+  - Reserved for v0.3: `wear_log`, `out_since`, `fit_feedback`, `fit_score`, `skip_count`, `last_suggested`, and owner `body_profile` / `schedule`.
+  - Per-owner `work_label`.
+  - The migration is lossless (unknown keys kept) and writes `.storage/laundry_hub.v2.backup` first.
+- **1.3 Photos:** Pillow pipeline applies EXIF orientation, strips metadata, converts to RGB and saves a 1600 px JPEG (q85) plus a 400 px thumbnail.
+  - Up to 8 per garment, 10 MB per upload.
+  - Multipart upload view, admin only. Authenticated serving with pre-signed URLs.
+  - Files are deleted with the photo or the garment. Legacy photos get thumbnails in the background.
+  - The panel uses `capture="environment"`, with multiple selection.
+- **1.4 URL import:** `laundry_hub/import_product_url` websocket command and `laundry_hub.import_product_url` service.
+  - Fetch limits: 10 s timeout, 3 MB, browser User-Agent, manual redirects (at most 5), each hop re-checked.
+  - Extraction order: JSON-LD `Product`, then OG / product meta, then Twitter cards.
+  - Up to 4 images through the photo pipeline. Preview first; nothing is written until apply.
+  - SSRF guard after DNS resolution: private, loopback, link-local, multicast, reserved, non-global, IPv4-mapped, localhost and `.local` are all refused.
+  - Failures come back as friendly messages.
+- **1.5 AI description:** `laundry_hub/garment/describe` and `laundry_hub.describe_garment`.
+  - Calls `ai_task` with a selector-built `structure`, the cover plus at most 2 more photos (1600 px) via a `media_source` platform, and the name, brand and notes.
+  - The result is validated against `taxonomy.py`; confidence below 0.5 → null.
+  - User fields are locked and survive re-describe; "Reset to AI" restores the AI value.
+  - Import/purchase data beats the AI.
+  - Taxonomy remap runs on load.
+  - Auto-describe runs after the first photo; there is a manual Re-describe; it never runs on a tap.
+  - Failures keep the old description and log a warning without image payloads.
+  - Privacy note in the options flow, the panel and the README.
+- **1.6 Purchase inbox:** nested `purchase` dict with `source: manual | url | email`; design stub in `docs/design/purchase-inbox.md`.
+- **2 Panel:**
+  - Vanilla web components split into modules (`laundry-panel.js`, `lib.js`, `home.js`, `closet.js`, `add.js`, `settings.js`, `detail.js`, `panel.css`, `tokens.css`), all loaded with `?v=0.2.0`.
+  - Bottom tabs on phones, a segmented control at ≥900 px with a two-column layout.
+  - Home: closet and wash-bin tiles with counts and up to 3 covers, a drying tile with an "oldest" hint, a missing card, a single-card empty state, and an Out tile only if `out_since` exists.
+  - Closet: search (including taxonomy and summary), chips for owner / location / bin / Needs photo / Needs review / Filters / Archived, a filter sheet over every taxonomy field with counts (zero options hidden, type → subtype cascade, colour swatches, formality and warmth ranges), photo grid, Select mode with a sticky action bar (Move to bin, Change dry type, Change owner, Set field…, Delete, "Select all in this filter"), and a FAB.
+  - Add: live tag listening (pulsing), manual UID entry, recently seen chips, basics with owner avatars, bin swatches and dry type chips (last choice remembered per bin), collapsed location, a wardrobe step (camera / choose / import link, purchase and size, description preview), and a confirmation with "Add another".
+  - Settings: read-only bins, dry types and wardrobe status, station health (online and last tap), per-owner work label, and a link to the HA options.
+  - Detail: photo carousel, status chip, wardrobe sections, description chips with locks, Re-describe, last 10 taps, and a ⋯ menu with Edit and Delete.
+  - Live state: websocket subscription with reconnect, backoff and a "Reconnecting…" pill.
+  - Accessibility: labels everywhere, never colour alone, visible focus, `prefers-reduced-motion`.
+- **Tokens:** `frontend/tokens.css` with shared `--hub-*` structure tokens, the Laundry `--lh-*` palette, the `--app-*` mapping, a dark mode and Follow HA. Documented in `docs/design/tokens.md`.
+
+## Decisions made without asking
+See `DECISIONS.md` (24 items with reasons). Highlights:
+- **Store v3 is a major version bump**, so HA won't load it under v0.1.2. A full v2 backup is written before migrating, and the README gives the rollback steps.
+- **Wardrobe off keeps v0.1's single cover photo.** Uploads still go through the new resize/strip pipeline.
+- **Photo uploads use a multipart HTTP view** (10 MB doesn't fit reliably in a websocket message). Photo URLs are pre-signed in `data`.
+- **AI attachments go through a non-browsable `media_source` platform**, because `ai_task` only accepts media-source attachments.
+- **"Needs review"** = core fields unset, or AI confidence below 0.7.
+- **Import data is never overwritten by re-describe.**
+- **Free-text product attributes are scanned for vocabulary terms.**
+- **The Add flow creates the garment when leaving step 2.**
+- **No web font is downloaded** (Inter if installed, otherwise system-ui).
+
+## Deviations from the prompt
+1. **Settings edits the per-owner "work" label.** The spec makes Settings read-only, but there's no other place for this label. To revert, remove the People card from `settings.js` and the `owner/update` command.
+2. **The `import_product_url` and `describe_garment` actions are registered even with Wardrobe off** (they refuse with `wardrobe_disabled`). HA registers services before options are known. To revert, register them conditionally in setup_entry.
+3. **The rise field is forced to `n/a` for non-bottoms**, even if the AI returns a value. The schema says "bottoms only". To revert, see `taxonomy.coerce_field`.
+
+## Tests
+- pytest (HA 2026.10.4, Python 3.14): 246 passed, 96.5 % coverage (gate 90 %).
+  - New `tests/test_wardrobe.py` (16 tests) and `tests/test_import_describe.py` (39 tests).
+  - Updated `tests/test_websocket.py`, which now uses real images.
+- Migration: lossless v2 → v3, v1 → v3, unknown keys round-trip, backup written, taxonomy remap on load.
+- Wardrobe-off regression: a v0.1.2 store + config; taps, sensors and views unchanged; every wardrobe command refused; owner/bin bulk changes still work.
+- Photos: EXIF orientation applied, metadata gone (EXIF, ICC, maker string), 1600 px / 400 px sizes, no upscaling, alpha → white, junk and oversize rejected, upload limit 8, admin only, reorder, delete removes files, garment delete removes all, legacy thumbnail fallback.
+- URL import: JSON-LD, og-only, nothing, 403, 500, timeout, non-HTML, redirect without Location, redirect to private, non-image image URL. SSRF cases: 127.0.0.1, 192.168.x, 10.x, ::1, `::ffff:127.0.0.1`, 169.254.169.254, localhost, .local, ftp, file, bad port, a hostname resolving private, empty DNS, NXDOMAIN. No live network or DNS (DNS patched, aiohttp mocked).
+- AI: mocked `ai_task` for success, schema mismatch, provider error and exception. At most 3 attachments with the cover first; low confidence → null; vocabulary mapping; per-type subtypes; locks survive re-describe; Reset to AI; manual-edit validation; auto-describe after the first photo only; bulk "Set field…"; Needs review; media-source resolution limited to the garment's own photos.
+- Panel: Playwright at 390×844 and 1280×800, with Wardrobe on and off.
+  - Renders all four tabs and the detail sheet.
+  - Filter sheet with subtype cascade, taxonomy search, Select mode bar.
+  - A live tap fills the UID and pre-selects the location from the station.
+  - Create payload, Settings health, Reconnecting pill.
+  - No horizontal scroll, no console errors, XSS inert.
+  - Screenshots go to the `panel-screenshots` CI artifact.
+- Mutation testing on the state machine (unchanged): 112/114 = 98.2 %. Firmware host tests: 484 checks. `esphome config` passes for both readers.
+- Nothing was skipped.
+
+## Bugs found and fixed
+| # | found by | bug | fix | regression test |
+|---|---|---|---|---|
+| 1 | test_wardrobe | `thumb_name("noext")` returned `.thumb.jpg` | Handle names without an extension | `test_ensure_thumbnail` |
+| 2 | test_import_describe | JSON-LD values kept HTML entities (`&amp;`) | Unescape extracted text | `test_parse_json_ld` |
+| 3 | test_import_describe | Taxonomy didn't map a singular to a plural ("sneaker" → "sneakers") | Two-way plural matching | `test_taxonomy_coerce` |
+| 4 | test_import_describe | Free-text materials ("Merino wool") didn't map | `taxonomy.extract` | `test_taxonomy_coerce`, `test_import_preview_and_apply` |
+| 5 | panel smoke test | A long wash-bin name made the phone layout scroll sideways | Swatches and cards wrap and shrink | smoke test `noHScroll` |
+| 6 | review | Two panel modules defined the same action name (`saveBasics`) | Renamed, plus a check for duplicates | — |
+
+## Needs hardware or a person to verify
+1. **Phone camera:** open the panel in the iPhone and Android companion apps, then Add → Take photo. The camera should open directly. Check that portrait photos come out upright and that thumbnails load.
+2. **Live tag:** with a station flashed, open Add and tap a new tag. The form should advance with the UID filled in and the closet pre-selected.
+3. **AI Task:** set an AI Task entity (e.g. OpenAI or Google Gemini) and add a photo. A description should appear within a minute. Then change a field and Re-describe: the change should stay.
+4. **URL import:** try 3 real store links. Expect some stores to block automatic imports; you should see the friendly message.
+5. **Dark mode and Follow HA theme colour:** switch the HA theme and check contrast.
+6. **Rollback drill (optional):** check that `.storage/laundry_hub.v2.backup` exists after upgrading.
+7. **Station health:** pull a station's power. Settings should show Offline within ESPHome's unavailable timeout.
+
+## Known gaps and bugs
+- **HEIC photos:** an iPhone HEIC file sent as-is (not converted by the browser) is refused, because Pillow has no HEIC support in HA core.
+- **DNS rebinding:** the SSRF guard checks DNS before each request, but aiohttp resolves again when connecting. That leaves a small DNS-rebinding window.
+- **Media browser:** "Laundry Hub" may appear as a source in HA's media browser. Browsing it shows an error by design.
+- **Photo URLs expire after 24 h.** Reloading the panel signs them again.
+- **Health "online" depends on ESPHome entities** existing for the device.
+- **Pantry Hub accent palette:** the "pressed" value and the others not in the mockup are my picks.
+
+## Open questions for Heather
+1. **Wardrobe-off photos:** keep one cover photo (v0.1 parity), or allow 8 even when off? Recommendation: keep one.
+2. **"Needs review" threshold:** is 0.7 right? Recommendation: keep it, and tune after real AI results.
+3. **Auto-describe:** should it also run when a URL import adds the first photo? Currently yes, through the same first-photo path. Recommendation: yes.
+4. **Media browser:** should garment photos be hidden from it entirely, by dropping the media-source listing? Recommendation: fine as is.
+5. **Per-owner work label:** keep it editable in the panel, or move it to an options sub-step? Recommendation: keep it in the panel.
+
+## Suggested next steps
+- **v0.2.1:** purchase inbox (IMAP + AI extraction) on top of the `purchase` model.
+- **v0.3:** "out" state and wear log using the reserved fields.
+- Port `tokens.css` to Pantry Hub.
+- Replace the README screenshot placeholders with the CI artifact images once the panel runs on real data.
+
+---
+
 # Laundry Hub build report
 - Version: 0.1.2 (release versioning; no behaviour change)
 - Date: 2026-11-27

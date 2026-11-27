@@ -89,9 +89,11 @@ async def test_diagnostics_redacted(hass: HomeAssistant, hass_client) -> None:
     await hass.config_entries.async_setup(entry.entry_id)
     hub: LaundryHub = entry.runtime_data
     hass.states.async_set("person.alex", "home")
-    hub.enroll(
+    g = hub.enroll(
         uid="04A1B2C3D4E5F6", name="Secret jacket", owner="person.alex", notes="private"
     )
+    g.purchase = {"store": "SecretStore", "order_ref": "ORDER-9"}
+    g.photos = ["secretphoto.jpg"]
     from homeassistant.util import dt as dt_util
 
     hub.catalog.record_unknown("AABBCCDD", "laundry", dt_util.utcnow())
@@ -104,6 +106,9 @@ async def test_diagnostics_redacted(hass: HomeAssistant, hass_client) -> None:
         "04A1B2C3D4E5F6",
         "AABBCCDD",
         "mobile_app_secret_phone",
+        "SecretStore",
+        "ORDER-9",
+        "secretphoto",
         dev,
     ):
         assert secret not in text, secret

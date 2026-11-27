@@ -10,18 +10,25 @@ import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
+from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
-from homeassistant.helpers import device_registry as dr, issue_registry as ir
+from homeassistant.helpers import (
+    device_registry as dr,
+    entity_registry as er,
+    issue_registry as ir,
+)
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
+from . import taxonomy
 from .const import (
     CLOSET_STATIONS,
     CONF_COLOR,
     CONF_FEEDBACK_TIMEOUT,
     CONF_FLASH_DURATION,
+    CONF_FOLLOW_HA_THEME,
     CONF_LIGHT_ENTITY,
     CONF_MISSING_AFTER,
     CONF_NAME,
@@ -40,6 +47,7 @@ from .const import (
     MODE_AUTO,
     MODES,
     PANEL_URL,
+    SIGNAL_TAP,
     SIGNAL_UPDATE,
     STATE_DRYING,
     STATE_IN_WASH,
@@ -50,18 +58,23 @@ from .const import (
     SUBENTRY_DRY_TYPE,
     SUBENTRY_WASH_BIN,
     TAP_EVENT,
+    VERSION,
     ZONE_TYPES,
 )
 from .lights import FlashController
 from .models import Garment, InvalidUid, Zone, garment_problems, normalize_uid
-from .photos import PhotoError, decode_photo, delete_photo, photo_dir, write_photo
+from .photos import PhotoError, decode_photo
 from .statemachine import Decision, InvalidTap, TapInput, decide, is_missing
 from .store import Catalog, CatalogError
+from .wardrobe import Wardrobe
 
 _LOGGER = logging.getLogger(__name__)
 
-SIGNAL_TAP = f"{DOMAIN}_tap"
 NOTIFY_THROTTLE = timedelta(hours=1)
+BASE_VIEW_KEYS = (
+    "id", "uids", "name", "owner", "wash_bin", "dry_type", "notes", "photos", "state",
+    "location", "last_seen", "last_laundry_tap", "created", "recent_taps", "lifecycle",
+)  # fmt: skip
 MISSING_REFRESH = timedelta(hours=1)
 LOCATIONS = (*CLOSET_STATIONS, STATE_IN_WASH, STATE_DRYING)
 
@@ -127,6 +140,7 @@ class LaundryHub:
         self._unsubs: list[Callable[[], None]] = []
         self._notified: dict[str, datetime] = {}
         self.zone_snapshot: dict[str, ConfigSubentry] = dict(entry.subentries)
+        self.wardrobe = Wardrobe(self)
 
     # --- settings ------------------------------------------------------
 
@@ -195,6 +209,11 @@ class LaundryHub:
         """Load the catalog and start listening for taps."""
         await self.catalog.async_load()
         self._repair_dangling_zones()
+        self.entry.async_create_background_task(
+            self.hass,
+            self.wardrobe.async_ensure_thumbnails(),
+            "laundry_hub thumbnails",
+        )
         self._unsubs.append(self.hass.bus.async_listen(TAP_EVENT, self._handle_event))
         self._unsubs.append(
             async_track_time_interval(self.hass, self._refresh_missing, MISSING_REFRESH)
@@ -334,6 +353,17 @@ class LaundryHub:
         garment.last_seen_station = station
         if decision.laundry_tap:
             garment.last_laundry_tap = now
+        self.catalog.record_station_tap(station, now)
+        self.catalog.record_garment_tap(
+            garment,
+            {
+                "time": now.isoformat(),
+                "station": station,
+                "event": decision.event_type,
+                "mode": mode,
+                "repeat": decision.repeat,
+            },
+        )
         self.catalog.schedule_save()
 
         feedback = decision.feedback
@@ -365,6 +395,7 @@ class LaundryHub:
                 "mode": mode,
                 "zone": zone.name if zone else None,
                 "repeat": decision.repeat,
+                "time": now.isoformat(),
             },
         )
         if zone is not None:
@@ -380,12 +411,13 @@ class LaundryHub:
 
     def _unknown_tap(self, station: str, uid: str, now: datetime) -> TapResult:
         self.catalog.record_unknown(uid, station, now)
+        self.catalog.record_station_tap(station, now)
         self.notify_changed()
         async_dispatcher_send(
             self.hass,
             SIGNAL_TAP,
             EVENT_UNKNOWN,
-            {"uid": uid, "station": station},
+            {"uid": uid, "station": station, "time": now.isoformat()},
         )
         last = self._notified.get(uid)
         if last is None or now - last >= NOTIFY_THROTTLE:
@@ -492,7 +524,8 @@ class LaundryHub:
             )
         return name
 
-    def _validate_owner(self, owner: object) -> str | None:
+    def validate_owner(self, owner: object) -> str | None:
+        """Return a valid person entity id (or None) or raise."""
         if owner in (None, ""):
             return None
         if not isinstance(owner, str) or not owner.startswith("person."):
@@ -587,7 +620,7 @@ class LaundryHub:
                 name=clean_name,
                 wash_bin=bin_zone.id,
                 dry_type=dry_zone.id,
-                owner=self._validate_owner(owner),
+                owner=self.validate_owner(owner),
                 notes=self._validate_notes(notes),
                 state=state,
                 location=loc,
@@ -604,7 +637,7 @@ class LaundryHub:
         if "name" in changes:
             updates["name"] = self._validate_name(changes["name"])
         if "owner" in changes:
-            updates["owner"] = self._validate_owner(changes["owner"])
+            updates["owner"] = self.validate_owner(changes["owner"])
         if "notes" in changes:
             updates["notes"] = self._validate_notes(changes["notes"])
         if changes.get("wash_bin"):
@@ -667,53 +700,28 @@ class LaundryHub:
         return garment
 
     async def async_remove(self, ref: str) -> Garment:
-        """Delete a garment (and its photo)."""
+        """Delete a garment (and its photos)."""
         garment = self.resolve_garment(ref)
         self.catalog.remove(garment.id)
-        if garment.photo:
-            await self.hass.async_add_executor_job(
-                delete_photo, photo_dir(self.hass), garment.photo
-            )
+        await self.wardrobe.async_delete_all(garment)
         self.notify_changed()
         return garment
 
     async def async_set_photo(self, ref: str, content_type: str, data: str) -> Garment:
-        """Store a garment photo (validated, size-limited, written off-loop)."""
+        """Legacy (v0.1) base64 upload: goes through the v0.2 photo pipeline."""
         garment = self.resolve_garment(ref)
         try:
-            raw, ext = decode_photo(content_type, data)
+            raw, _ext = decode_photo(content_type, data)
         except PhotoError as err:
             raise validation_error(err.key, str(err)) from err
-        filename = f"{garment.id}.{ext}"
-        directory = photo_dir(self.hass)
-        try:
-            await self.hass.async_add_executor_job(
-                write_photo, directory, filename, raw
-            )
-            if garment.photo and garment.photo != filename:
-                await self.hass.async_add_executor_job(
-                    delete_photo, directory, garment.photo
-                )
-        except OSError as err:
-            raise HomeAssistantError(f"Could not store photo: {err}") from err
-        garment.photo = filename
-        self.catalog.schedule_save()
-        self.notify_changed()
+        await self.wardrobe.async_add_photo(garment, raw)  # replaces when off
         return garment
 
     async def async_delete_photo(self, ref: str) -> Garment:
-        """Remove a garment photo."""
+        """Legacy (v0.1): remove the cover photo."""
         garment = self.resolve_garment(ref)
-        if garment.photo:
-            try:
-                await self.hass.async_add_executor_job(
-                    delete_photo, photo_dir(self.hass), garment.photo
-                )
-            except OSError as err:
-                raise HomeAssistantError(f"Could not delete photo: {err}") from err
-            garment.photo = None
-            self.catalog.schedule_save()
-            self.notify_changed()
+        if garment.photos:
+            await self.wardrobe.async_delete_photo(garment, garment.photos[0])
         return garment
 
     def reassign(
@@ -840,9 +848,16 @@ class LaundryHub:
     def garment_view(
         self, garment: Garment, now: datetime | None = None
     ) -> dict[str, Any]:
-        """Serializable garment for the panel / responses."""
-        data = garment.to_dict()
+        """Serializable garment for the panel / responses.
+
+        Wardrobe fields appear only when the wardrobe is on; v0.3 reserved
+        fields are never sent.
+        """
+        stored = garment.to_dict()
+        data = {key: stored[key] for key in BASE_VIEW_KEYS}
+        data["photo"] = garment.photo
         data["missing"] = self.is_missing(garment, now)
+        data.update(self.wardrobe.view(garment))
         return data
 
     def zone_view(self, zone: Zone) -> dict[str, Any]:
@@ -875,7 +890,52 @@ class LaundryHub:
             ),
             "missing_after_days": self.missing_after.days,
             "entry_id": self.entry.entry_id,
+            "version": VERSION,
+            "station_health": self.station_health(),
+            "owners": {
+                owner: self.catalog.owner_settings(owner)
+                for owner in sorted(
+                    {g.owner for g in self.catalog.garments.values() if g.owner}
+                    | set(self.catalog.owners)
+                )
+            },
+            "wardrobe": {
+                "enabled": self.wardrobe.enabled,
+                "ai_entity": self.wardrobe.ai_entity if self.wardrobe.enabled else None,
+                "currency": self.hass.config.currency,
+                "photo_limit": self.wardrobe.photo_limit(),
+            },
+            "follow_ha_theme": bool(self.options.get(CONF_FOLLOW_HA_THEME, False)),
+            "taxonomy": taxonomy.vocabulary() if self.wardrobe.enabled else None,
         }
+
+    def station_health(self) -> list[dict[str, Any]]:
+        """Per station: configured device, last tap, online (None = unknown)."""
+        devices = self.options.get(CONF_STATION_DEVICES) or {}
+        registry = er.async_get(self.hass)
+        out = []
+        for station in STATIONS:
+            device_id = devices.get(station)
+            online: bool | None = None
+            if device_id:
+                states = [
+                    self.hass.states.get(e.entity_id)
+                    for e in er.async_entries_for_device(registry, device_id)
+                ]
+                known = [st for st in states if st is not None]
+                if known:
+                    online = any(st.state != STATE_UNAVAILABLE for st in known)
+            out.append(
+                {
+                    "station": station,
+                    "configured": bool(device_id),
+                    "online": online,
+                    "last_tap": (self.catalog.stations.get(station) or {}).get(
+                        "last_tap"
+                    ),
+                }
+            )
+        return out
 
     # --- subentry removal guard -----------------------------------------
 

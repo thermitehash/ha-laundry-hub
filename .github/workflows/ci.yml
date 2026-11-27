@@ -115,6 +115,13 @@ jobs:
           node-version: 22
       - run: npm install --no-save playwright@1.56.1 && npx playwright install --with-deps chromium
       - run: node tests/panel/smoke.mjs
+      - name: Panel screenshots (390x844 and 1280x800)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: panel-screenshots
+          path: tests/panel/screenshots/
+          if-no-files-found: warn
 
   firmware-host-tests:
     strategy:
