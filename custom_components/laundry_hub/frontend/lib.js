@@ -6,6 +6,12 @@ export const esc = (value) =>
   })[c]);
 
 export const STATION_LABEL = { laundry: "Laundry room", closet_1: "Closet 1", closet_2: "Closet 2" };
+// Station name for display; phone taps (v0.2.3) arrive as "phone:<device>".
+export const stationLabel = (station) => {
+  const s = String(station || "");
+  if (s.startsWith("phone:")) return `Phone · ${s.slice(6) || "phone"}`;
+  return STATION_LABEL[s] || s;
+};
 export const LOCATION_LABEL = {
   closet_1: "Closet 1", closet_2: "Closet 2", in_wash: "In wash", drying: "Drying",
   new: "Not placed", missing: "Missing",

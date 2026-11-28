@@ -5,7 +5,7 @@ tracking and laundry sorting lights. Tap a tagged garment on a station and Laund
 works out where it goes next. The matching wash bin or dry zone lights up on a WLED strip,
 and the station's LED confirms the tap.
 
-> **Status: v0.2.2, unverified on hardware.** Everything is built and tested against fakes
+> **Status: v0.2.3, unverified on hardware.** Everything is built and tested against fakes
 > (see [`docs/build-report.md`](docs/build-report.md)). Stations, readers, tags and WLED
 > have not been tested on real hardware yet.
 
@@ -55,6 +55,7 @@ Everything is configured in the UI.
 | Wardrobe catalog       | off     | Photos, purchase details and AI descriptions per garment (see below) |
 | AI Task entity         | –       | Used to describe garments from their photos (optional) |
 | Follow HA theme colour | off     | Use your HA theme's primary colour instead of Laundry teal |
+| App access             | Admins only | *Household* lets other HA users use the iPhone app for their own garments (see below) |
 
 With Wardrobe on, **Configure** opens a menu: **Main settings** (the table above) and
 **Purchase emails** (see below).
@@ -100,8 +101,8 @@ everything works exactly as in v0.1.2.
 
 - **Photos**: up to 8 per garment, taken straight from the phone camera. Each photo is resized to
   1600 px plus a 400 px thumbnail, rotated upright, and stripped of metadata such as location.
-  Photos are stored in `/config/laundry_hub/photos/` and only shown to logged-in admins, never
-  from `/local` or `www/`.
+  Photos are stored in `/config/laundry_hub/photos/` and only shown to admins (and, with
+  Household access, to their owner), never from `/local` or `www/`.
 - **Purchase details**: brand, size (as printed, plus size system and cut), store, date, price
   (in your Home Assistant currency), product link and order reference.
 - **Import from link**: paste a product page link to fill in name, brand, price and up to 4 photos.
@@ -182,6 +183,20 @@ appears under **Settings → Repairs**; it asks for a new app password and tests
 > provider behind the AI Task entity you chose. Nothing is sent unless Wardrobe is on and an
 > AI Task entity is set. Product-link imports fetch only the page you paste and its images.
 
+## App access (iPhone app)
+
+Laundry Hub can serve a second client, the iPhone app, through Home Assistant's own login and
+websocket. The contract is in [`docs/app-api.md`](docs/app-api.md).
+
+- **Admins only** (default): only HA administrators can use Laundry Hub, exactly as before.
+- **Household:** other HA users (members) can use the app too. Each member sees, phone-taps and
+  edits only their own owner's garments (name, notes, photos, size, description and wear for).
+  Deleting, zones, bulk changes, purchase emails and other people's garments stay admin-only.
+  After choosing Household, pick which person each HA user is. Users linked to a person in
+  Settings → People are filled in for you.
+- A phone can act as a tap station. Its taps go through the same rules, flash the zone light,
+  and show up in `event.laundry_hub_tap` with station `phone:<device name>`.
+
 ## Entities
 
 | Entity | State | Attributes |
@@ -238,13 +253,16 @@ actions:
 
 ## Data and privacy
 
-The catalog is stored locally in `/config/.storage/laundry_hub` (format v3.2): versioned, written
+The catalog is stored locally in `/config/.storage/laundry_hub` (format v3.3): versioned, written
 atomically and debounced. Purchase cards are kept there too. Photos (garments and cards) live in
 `/config/laundry_hub/photos/`. Diagnostics redact names, owners, notes, tag UIDs, photos,
 purchase details, notify targets, the email address, the password and custom sender domains.
 
-**Going back to v0.2.0:** no restore is needed. v0.2.0 reads the v3.2 file and ignores
-purchase cards.
+**Going back to v0.2.0–v0.2.2:** no restore is needed. They read the v3.3 file and ignore the
+parts they don't know (purchase cards, revision numbers).
+
+Garment photos are served only to administrators, and to members (Household access) for their
+own garments.
 
 **Going back to v0.1.2:** v0.2 converts the catalog to a new format and keeps the old one as
 `/config/.storage/laundry_hub.v2.backup`. To roll back: stop Home Assistant, install v0.1.2,

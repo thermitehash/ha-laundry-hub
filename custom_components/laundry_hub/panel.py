@@ -17,6 +17,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.http import KEY_HASS
 
+from .access import Caller, caller_for, can_edit_garment, can_see_garment
 from .const import (
     DOMAIN,
     PANEL_COMPONENT,
@@ -48,8 +49,10 @@ class PhotoView(HomeAssistantView):
         entries = hass.config_entries.async_loaded_entries(DOMAIN)
         if not entries:
             return web.Response(status=HTTPStatus.NOT_FOUND)
-        garment = entries[0].runtime_data.catalog.garments.get(garment_id)
-        if garment is None or not garment.photo:
+        hub = entries[0].runtime_data
+        garment = hub.catalog.garments.get(garment_id)
+        caller = caller_for(hub, request.get(KEY_HASS_USER))
+        if garment is None or not garment.photo or not can_see_garment(caller, garment):
             return web.Response(status=HTTPStatus.NOT_FOUND)
         path = photo_path(hass, garment.photo)
         if path is None or not await hass.async_add_executor_job(path.is_file):
@@ -75,14 +78,8 @@ class PhotosView(HomeAssistantView):
         hub = _hub(hass)
         if hub is None or not is_safe_name(filename):
             return web.Response(status=HTTPStatus.NOT_FOUND)
-        owned = any(
-            filename in g.photos or filename in {thumb_name(p) for p in g.photos}
-            for g in hub.catalog.garments.values()
-        ) or any(
-            hub.purchases.owns_photo(name)
-            for name in (filename, filename.replace(".thumb.jpg", ".jpg"))
-            if name.startswith("purchase-")
-        )
+        caller = caller_for(hub, request.get(KEY_HASS_USER))
+        owned = _may_see_photo(hub, caller, filename)
         path = photo_path(hass, filename)
         if not owned or path is None:
             return web.Response(status=HTTPStatus.NOT_FOUND)
@@ -100,6 +97,35 @@ class PhotosView(HomeAssistantView):
         )
 
 
+def _may_see_photo(hub: Any, caller: Caller, filename: str) -> bool:
+    """A garment's (or purchase card's) photo, visible to this caller.
+
+    Admins see every photo. A member (household access) sees photos of their
+    own garments and of purchase cards matched to them. Anything else is 404.
+    """
+    if not caller.allowed:
+        return False
+    garments = [
+        g
+        for g in hub.catalog.garments.values()
+        if filename in g.photos or filename in {thumb_name(p) for p in g.photos}
+    ]
+    if any(can_see_garment(caller, g) for g in garments):
+        return True
+    for name in (filename, filename.replace(".thumb.jpg", ".jpg")):
+        if not name.startswith("purchase-"):
+            continue
+        for card in hub.catalog.purchases.values():
+            if name not in (card.get("photos") or []):
+                continue
+            if caller.is_admin:
+                return True
+            garment = hub.catalog.garments.get(str(card.get("garment_id")))
+            if garment is not None and can_see_garment(caller, garment):
+                return True
+    return False
+
+
 class PendingPhotoView(HomeAssistantView):
     """Thumbnails of images downloaded for a URL-import preview."""
 
@@ -111,7 +137,8 @@ class PendingPhotoView(HomeAssistantView):
         """Return the preview thumbnail."""
         hub = _hub(request.app[KEY_HASS])
         data = None
-        if hub is not None and index.isdigit():
+        user = request.get(KEY_HASS_USER)
+        if hub is not None and index.isdigit() and user is not None and user.is_admin:
             data = hub.wardrobe.pending_thumb(token, int(index))
         if data is None:
             return web.Response(status=HTTPStatus.NOT_FOUND)
@@ -119,7 +146,10 @@ class PendingPhotoView(HomeAssistantView):
 
 
 class PhotoUploadView(HomeAssistantView):
-    """Upload one photo (multipart: garment_id, file). Admin only."""
+    """Upload one photo (multipart: garment_id, file).
+
+    Admins for any garment; members (household access) for their own.
+    """
 
     url = PHOTOS_URL
     name = "api:laundry_hub:photos:upload"
@@ -128,12 +158,12 @@ class PhotoUploadView(HomeAssistantView):
     async def post(self, request: web.Request) -> web.Response:
         """Resize, strip and store the photo; returns the garment view."""
         hass: HomeAssistant = request.app[KEY_HASS]
-        user = request.get(KEY_HASS_USER)
-        if user is None or not user.is_admin:
-            return self.json_message("Admin only", HTTPStatus.UNAUTHORIZED)
         hub = _hub(hass)
         if hub is None:
             return self.json_message("Laundry Hub is not set up", HTTPStatus.NOT_FOUND)
+        caller = caller_for(hub, request.get(KEY_HASS_USER))
+        if not caller.allowed:
+            return self.json_message("Admin only", HTTPStatus.UNAUTHORIZED)
         request._client_max_size = PHOTO_UPLOAD_MAX_BYTES + 64 * 1024
         try:
             form = await request.post()
@@ -148,6 +178,11 @@ class PhotoUploadView(HomeAssistantView):
         raw = await hass.async_add_executor_job(upload.file.read)
         try:
             garment = hub.resolve_garment(garment_id)
+            if not can_edit_garment(caller, garment):
+                return self.json_message(
+                    "You can only add photos to your own garments",
+                    HTTPStatus.FORBIDDEN,
+                )
             await hub.wardrobe.async_add_photo(garment, raw)
         except ServiceValidationError as err:
             return self.json(

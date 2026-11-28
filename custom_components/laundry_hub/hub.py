@@ -23,6 +23,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 
 from . import taxonomy
+from .access import Caller, Forbidden, can_see_garment
 from .const import (
     CLOSET_STATIONS,
     CONF_COLOR,
@@ -45,6 +46,8 @@ from .const import (
     MAX_NAME_LEN,
     MAX_NOTES_LEN,
     MODE_AUTO,
+    MODE_DRY,
+    MODE_SORT,
     MODES,
     PANEL_URL,
     SIGNAL_TAP,
@@ -65,6 +68,7 @@ from .lights import FlashController
 from .models import Garment, InvalidUid, Zone, garment_problems, normalize_uid
 from .photos import PhotoError, decode_photo
 from .purchases import PurchaseInbox, rank_cards
+from .revs import RevTracker
 from .statemachine import Decision, InvalidTap, TapInput, decide, is_missing
 from .store import Catalog, CatalogError
 from .wardrobe import Wardrobe
@@ -143,6 +147,7 @@ class LaundryHub:
         self.zone_snapshot: dict[str, ConfigSubentry] = dict(entry.subentries)
         self.wardrobe = Wardrobe(self)
         self.purchases = PurchaseInbox(self)
+        self.revs = RevTracker(self)
 
     # --- settings ------------------------------------------------------
 
@@ -211,6 +216,7 @@ class LaundryHub:
         """Load the catalog and start listening for taps."""
         await self.catalog.async_load()
         self._repair_dangling_zones()
+        self.revs.sync()
         self.entry.async_create_background_task(
             self.hass,
             self.wardrobe.async_ensure_thumbnails(),
@@ -263,11 +269,17 @@ class LaundryHub:
 
     @callback
     def _refresh_missing(self, _now: datetime) -> None:
+        self.revs.sync()  # "missing" is derived from time: revs follow it
         async_dispatcher_send(self.hass, SIGNAL_UPDATE)
 
     @callback
     def notify_changed(self) -> None:
-        """Tell entities and panel subscribers the catalog changed."""
+        """Tell entities and panel subscribers the catalog changed.
+
+        Revs are assigned first, so every "changed" message carries the rev
+        that includes the change.
+        """
+        self.revs.sync()
         async_dispatcher_send(self.hass, SIGNAL_UPDATE)
 
     # --- taps ----------------------------------------------------------
@@ -330,11 +342,22 @@ class LaundryHub:
         return result
 
     async def _process_tap(
-        self, station: str, uid: str, mode: str, now: datetime
+        self,
+        station: str,
+        uid: str,
+        mode: str,
+        now: datetime,
+        origin: str | None = None,
     ) -> TapResult:
+        """Run one tap through the state machine.
+
+        ``origin`` names a phone ("phone:<device>"): it is what recent taps and
+        the tap event show, while ``station`` is the station it acts as. A
+        phone tap doesn't count towards station health.
+        """
         garment = self.catalog.by_uid(uid)
         if garment is None:
-            return self._unknown_tap(station, uid, now)
+            return self._unknown_tap(origin or station, uid, now)
 
         try:
             decision = decide(
@@ -357,12 +380,13 @@ class LaundryHub:
         garment.last_seen_station = station
         if decision.laundry_tap:
             garment.last_laundry_tap = now
-        self.catalog.record_station_tap(station, now)
+        if origin is None:
+            self.catalog.record_station_tap(station, now)
         self.catalog.record_garment_tap(
             garment,
             {
                 "time": now.isoformat(),
-                "station": station,
+                "station": origin or station,
                 "event": decision.event_type,
                 "mode": mode,
                 "repeat": decision.repeat,
@@ -395,7 +419,7 @@ class LaundryHub:
                 "name": garment.name,
                 "owner": garment.owner,
                 "uid": uid,
-                "station": station,
+                "station": origin or station,
                 "mode": mode,
                 "zone": zone.name if zone else None,
                 "repeat": decision.repeat,
@@ -415,7 +439,8 @@ class LaundryHub:
 
     def _unknown_tap(self, station: str, uid: str, now: datetime) -> TapResult:
         self.catalog.record_unknown(uid, station, now)
-        self.catalog.record_station_tap(station, now)
+        if station in STATIONS:  # a phone isn't a station (health)
+            self.catalog.record_station_tap(station, now)
         self.notify_changed()
         async_dispatcher_send(
             self.hass,
@@ -435,6 +460,82 @@ class LaundryHub:
                 f"laundry_hub notify {uid}",
             )
         return TapResult(uid, station, FEEDBACK_UNKNOWN, EVENT_UNKNOWN)
+
+    # --- phone taps (v0.2.3) ----------------------------------------------
+
+    @staticmethod
+    def available_actions(garment: Garment) -> list[str]:
+        """What a phone tap can do with this garment (more in v0.3)."""
+        return [
+            *(f"put_away:{closet}" for closet in CLOSET_STATIONS),
+            f"in_wash:{garment.wash_bin}",
+            f"drying:{garment.dry_type}",
+        ]
+
+    async def async_phone_tap(
+        self,
+        raw_uid: str,
+        *,
+        device_name: str | None,
+        action: str | None,
+        caller: Caller,
+    ) -> dict[str, Any]:
+        """A phone acting as a tap station.
+
+        Without ``action``: an unknown tag is recorded like a station tap
+        (event + Add); a known garment comes back with its available actions.
+        With ``action``: applied through the same state machine as a station
+        tap, recorded as ``phone:<device_name>``.
+        """
+        uid = self._uid(raw_uid)
+        name = " ".join(str(device_name or "").split())[:60] or "phone"
+        origin = f"phone:{name}"
+        now = dt_util.utcnow()
+        garment = self.catalog.by_uid(uid)
+        if garment is None:
+            if action:
+                raise validation_error(
+                    "tag_not_enrolled", "That tag isn't on a garment yet"
+                )
+            async with self._tap_lock:
+                self._unknown_tap(origin, uid, now)
+            return {"known": False, "uid": uid, "rev": self.revs.rev}
+        if not can_see_garment(caller, garment):
+            raise Forbidden("That tag belongs to someone else's garment")
+        actions = self.available_actions(garment)
+        if action is None:
+            return {
+                "known": True,
+                "uid": uid,
+                "garment": self.garment_view(garment),
+                "available_actions": actions,
+                "rev": self.revs.rev,
+            }
+        if action not in actions:
+            raise validation_error(
+                "invalid_action",
+                f"{action} isn't possible for this garment",
+                action=action,
+            )
+        kind, _, target = action.partition(":")
+        if kind == "put_away":
+            station, mode = target, MODE_AUTO
+        elif kind == "in_wash":
+            station, mode = STATION_LAUNDRY, MODE_SORT
+        else:
+            station, mode = STATION_LAUNDRY, MODE_DRY
+        async with self._tap_lock:
+            result = await self._process_tap(station, uid, mode, now, origin=origin)
+        return {
+            "known": True,
+            "uid": uid,
+            "applied": action,
+            "event_type": result.event_type,
+            "repeat": bool(result.decision and result.decision.repeat),
+            "garment": self.garment_view(garment),
+            "available_actions": self.available_actions(garment),
+            "rev": self.revs.rev,
+        }
 
     # --- feedback & notifications ----------------------------------------
 
@@ -850,23 +951,26 @@ class LaundryHub:
         return found
 
     def garment_view(
-        self, garment: Garment, now: datetime | None = None
+        self, garment: Garment, now: datetime | None = None, *, synced: bool = False
     ) -> dict[str, Any]:
         """Serializable garment for the panel / responses.
 
         Wardrobe fields appear only when the wardrobe is on; v0.3 reserved
-        fields are never sent.
+        fields are never sent. ``rev``/``updated_at`` are current: revs are
+        synced first unless the caller already did (the snapshot).
         """
+        if not synced:
+            self.revs.sync()
         stored = garment.to_dict()
         data = {key: stored[key] for key in BASE_VIEW_KEYS}
         data["photo"] = garment.photo
         data["missing"] = self.is_missing(garment, now)
         data.update(self.wardrobe.view(garment))
-        return data
+        return self.revs.stamp("garment", garment.id, data)
 
     def zone_view(self, zone: Zone) -> dict[str, Any]:
-        """Serializable zone."""
-        return {
+        """Serializable zone (with rev once the tracker knows it)."""
+        view = {
             "id": zone.id,
             "type": zone.type,
             "name": zone.name,
@@ -875,20 +979,30 @@ class LaundryHub:
             "order": zone.order,
             "usage": self.catalog.usage(zone.id),
         }
+        meta = self.revs.meta("zone", zone.id)
+        if meta is not None:
+            view.update(meta)
+        return view
 
     def snapshot(self) -> dict[str, Any]:
-        """Everything the panel needs."""
+        """Everything the panel needs (and the app's full read)."""
         now = dt_util.utcnow()
+        self.revs.sync(now)
         return {
+            "rev": self.revs.rev,
             "garments": [
-                self.garment_view(g, now) for g in self.catalog.garments.values()
+                self.garment_view(g, now, synced=True)
+                for g in self.catalog.garments.values()
             ],
             "wash_bins": [self.zone_view(z) for z in self.zones_of(SUBENTRY_WASH_BIN)],
             "dry_types": [self.zone_view(z) for z in self.zones_of(SUBENTRY_DRY_TYPE)],
             "stations": list(STATIONS),
             "last_unknown": self.catalog.last_unknown,
             "unknown_tags": sorted(
-                self.catalog.unknown_tags.values(),
+                (
+                    self.revs.stamp("unknown_tag", uid, dict(tag))
+                    for uid, tag in self.catalog.unknown_tags.items()
+                ),
                 key=lambda t: t.get("last_seen", ""),
                 reverse=True,
             ),

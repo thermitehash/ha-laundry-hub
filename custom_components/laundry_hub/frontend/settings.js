@@ -25,7 +25,7 @@ export function render(ctx) {
       <span class="state unknown">${z.light_entity ? lib.esc(z.light_entity) : "No light"} · ${z.usage} garment${z.usage === 1 ? "" : "s"}</span></div>`).join("");
   const stations = (data.station_health || []).map((s) => {
     const state = !s.configured ? ["unknown", "Not set up"] : s.online === true ? ["ok", "Online"] : s.online === false ? ["problem", "Offline"] : ["unknown", "Unknown"];
-    return `<div class="health"><span>${lib.esc(lib.STATION_LABEL[s.station] || s.station)}</span>
+    return `<div class="health"><span>${lib.esc(lib.stationLabel(s.station))}</span>
       <span class="sub">Last tap ${lib.esc(lib.timeAgo(s.last_tap))}</span><span class="state ${state[0]}">${state[1]}</span></div>`;
   }).join("");
   const w = data.wardrobe || {};

@@ -842,7 +842,7 @@ class PurchaseInbox:
             if key not in ("source_message_id", "sender_domain", "image_url")
         }
         view["uniform_supplier"] = is_uniform_supplier(card.get("store_key"))
-        return view
+        return self.hub.revs.stamp("purchase", str(card.get("id")), view)
 
 
 async def async_count_store_emails(

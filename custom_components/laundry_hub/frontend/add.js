@@ -58,7 +58,7 @@ function stepTag(ctx) {
     ${known}
     ${recent.length ? `<h2 class="section-label">Seen recently</h2><div class="chips wrap">${recent.map((t) => `
       <button type="button" class="chip tall" data-act="useUid" data-uid="${lib.esc(t.uid)}" data-station="${lib.esc(t.station)}">
-        …${lib.esc(t.uid.slice(-6))} · ${lib.esc(lib.STATION_LABEL[t.station] || t.station)} · ${lib.esc(lib.timeAgo(t.last_seen))}</button>`).join("")}</div>` : ""}`;
+        …${lib.esc(t.uid.slice(-6))} · ${lib.esc(lib.stationLabel(t.station))} · ${lib.esc(lib.timeAgo(t.last_seen))}</button>`).join("")}</div>` : ""}`;
 }
 
 function stepOrder(ctx) {

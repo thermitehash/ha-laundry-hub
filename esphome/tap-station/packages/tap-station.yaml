@@ -7,7 +7,7 @@
 substitutions:
   # Firmware is not released separately; it tracks the integration version
   # (custom_components/laundry_hub/manifest.json), checked in CI.
-  firmware_version: "0.2.2"
+  firmware_version: "0.2.3"
   reader: st25r_i2c            # st25r_i2c | rc522
   # Where the st25r_i2c external component lives. "components" = next to the
   # device YAML. Use github://thermitehash/ha-laundry-hub/esphome/tap-station/components@main
