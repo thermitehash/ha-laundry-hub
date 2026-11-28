@@ -19,6 +19,8 @@ function purchaseRow(ctx) {
        <div class="kv"><span>Stores</span><span>${p.stores}</span></div>
        <div class="kv"><span>Last check</span><span>${lib.esc(lib.timeAgo(p.last_check))}</span></div>
        <div class="kv"><span>New cards</span><span>${p.new_cards}</span></div>
+       ${p.cleanup ? `<div class="row wrap" data-section="purchase-cleanup"><span style="flex:1">Cleaned up: ${p.cleanup.removed} non-clothing removed, ${p.cleanup.grouped} duplicates grouped</span>
+         <button type="button" class="btn small" data-act="cleanupSeen">OK</button></div>` : ""}
        <div class="kv"><span>Last problem</span><span class="${p.last_error ? "state problem" : ""}">${lib.esc(p.last_error || "None")}</span></div>
        ${(p.unreadable || []).length ? `<div class="kv"><span>Couldn't read</span><span class="state problem">${lib.esc(unreadableText(lib, p.unreadable))}</span></div>
        <button type="button" class="btn" data-act="retryUnreadable" ${ctx.state.busy?.retry ? "disabled" : ""}>${ctx.state.busy?.retry ? "Reading again…" : "Retry unreadable emails"}</button>` : ""}`
@@ -67,6 +69,9 @@ export function render(ctx) {
 }
 
 export const actions = {
+  async cleanupSeen(ctx) {
+    if (await ctx.ws("purchases/cleanup_seen", {})) ctx.reload();
+  },
   async retryUnreadable(ctx) {
     ctx.state.busy = { ...(ctx.state.busy || {}), retry: true };
     ctx.render();

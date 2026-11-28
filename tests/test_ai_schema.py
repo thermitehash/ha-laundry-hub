@@ -341,6 +341,6 @@ async def test_schema_rejection_is_logged_once_per_run(
     assert calls.count("extract.item") == 2  # rejected for both emails
     logged = [r for r in caplog.records if "too complex" in r.getMessage()]
     assert len(logged) == 1
-    assert "'item' (9 fields)" in logged[0].getMessage()
+    assert "'item' (12 fields)" in logged[0].getMessage()
     card = next(iter(hub.purchases.cards.values()))
     assert card["size"] == "M" and card["cut"] == "Regular"

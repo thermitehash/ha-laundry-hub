@@ -7,8 +7,10 @@ Roles:
   ``household``. A member is mapped to one Laundry Hub owner (a ``person``
   entity): by the option's people mapping, else by the person entity linked
   to their HA user. A member may read their own owner's garments (and the
-  zones), phone-tap, and edit their own garments' name, notes, photos, size,
-  description fields and wear_for. Nothing else.
+  zones), phone-tap, and edit their own garments' name, notes, photos, size
+  and wear_for. From v0.2.6 a member also sees the purchase cards assigned to
+  their owner, and may match them to their own garments, dismiss them, or
+  mark them Not clothing. Nothing else.
 
 Every websocket command declares a ``Policy``; ``check()`` enforces it. HTTP
 photo views use ``can_see_garment`` / ``can_edit_garment``.
@@ -57,6 +59,7 @@ class Policy(StrEnum):
     OWN_GARMENT = "own_garment"  # admins, or a member acting on their own garment
     TAP = "tap"  # admins, or a member (own garments for actions)
     ENROL = "enrol"  # admins, or a member creating a garment for themselves
+    PURCHASE = "purchase"  # admins, or a member acting on a card assigned to them
 
 
 class Forbidden(HomeAssistantError):
@@ -132,6 +135,24 @@ def can_edit_garment(caller: Caller, garment: Garment) -> bool:
     return can_see_garment(caller, garment)
 
 
+def can_see_card(caller: Caller, hub: LaundryHub, card: dict[str, Any]) -> bool:
+    """Admins see every card; a member sees cards assigned to their owner.
+
+    A card already matched to one of the member's garments stays visible too.
+    """
+    if caller.is_admin:
+        return True
+    if not caller.household or caller.owner is None:
+        return False
+    if card.get("owner") == caller.owner:
+        return True
+    for match in card.get("matches") or [{"garment_id": card.get("garment_id")}]:
+        garment = hub.catalog.garments.get(str(match.get("garment_id")))
+        if garment is not None and garment.owner == caller.owner:
+            return True
+    return False
+
+
 def member_unknown_tags(
     hub: LaundryHub, caller: Caller, now: datetime | None = None
 ) -> list[dict[str, Any]]:
@@ -177,6 +198,9 @@ def check(caller: Caller, policy: Policy, hub: LaundryHub, msg: dict[str, Any]) 
     if policy is Policy.ENROL:
         _check_enrol(caller, hub, msg)
         return
+    if policy is Policy.PURCHASE:
+        _check_purchase(caller, hub, msg)
+        return
     # OWN_GARMENT: the garment must be the member's, and only member fields.
     garment = hub.resolve_garment(str(msg.get("garment_id", "")))
     if not can_edit_garment(caller, garment):
@@ -214,3 +238,16 @@ def _check_enrol(caller: Caller, hub: LaundryHub, msg: dict[str, Any]) -> None:
             "tag_not_yours",
             "Tap the new tag with your phone first, then add it",
         )
+
+
+def _check_purchase(caller: Caller, hub: LaundryHub, msg: dict[str, Any]) -> None:
+    """A member acting on a purchase card: assigned to them, with their garment."""
+    card = hub.catalog.purchases.get(str(msg.get("card_id", "")))
+    if card is None:
+        return  # the command answers unknown_purchase
+    if caller.owner is None or card.get("owner") != caller.owner:
+        raise _deny("You can only use purchases assigned to you")
+    if "garment_id" in msg:
+        garment = hub.resolve_garment(str(msg["garment_id"]))
+        if not can_edit_garment(caller, garment):
+            raise _deny("You can only match purchases to your own garments")

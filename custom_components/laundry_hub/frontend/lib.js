@@ -165,12 +165,17 @@ export const shortDate = (iso) => {
 export const unmatchedCards = (data) => (data.purchases?.cards || []).filter((c) => c.status === "new");
 
 // One purchase card: photo, name, store · date · price.
-export function purchaseCard(card, { act = "", attrs = "", pressed = null } = {}) {
+export function purchaseCard(card, { act = "", attrs = "", pressed = null, ownerName = null } = {}) {
   const thumb = card.photo_urls && card.photo_urls[0] ? card.photo_urls[0].thumb : null;
   const meta = [card.store, shortDate(card.order_date), money(card.unit_price, card.currency)].filter(Boolean).join(" · ");
+  const look = [card.brand && card.brand !== card.store ? card.brand : null, card.color, card.size, card.cut].filter(Boolean).join(" · ");
+  const qty = Number(card.quantity || 1);
+  const left = card.remaining ?? qty;
+  const badge = qty > 1 ? `<span class="qty" title="${left < qty ? `${left} of ${qty} still to match` : `${qty} units`}">×${qty}${left < qty ? ` · ${left} left` : ""}</span>` : "";
+  const owner = ownerName && card.owner ? `<span class="meta">For ${esc(ownerName(card.owner))}</span>` : "";
   const tag = act ? "button" : "div";
   return `<${tag} ${act ? `type="button" data-act="${act}"` : ""} class="pcard" data-card="${esc(card.id)}" ${attrs} ${pressed === null ? "" : `aria-pressed="${pressed}"`}>
     <div class="pmedia">${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : `<span aria-hidden="true">${esc(initials(card.name))}</span>`}</div>
-    <div class="pbody"><span class="name">${esc(card.name)}</span><span class="meta">${esc(meta)}</span>
-      ${card.size || card.color ? `<span class="meta">${esc([card.color, card.size].filter(Boolean).join(" · "))}</span>` : ""}</div></${tag}>`;
+    <div class="pbody"><span class="name">${esc(card.name)}${badge ? ` ${badge}` : ""}</span><span class="meta">${esc(meta)}</span>
+      ${look ? `<span class="meta">${esc(look)}</span>` : ""}${owner}</div></${tag}>`;
 }

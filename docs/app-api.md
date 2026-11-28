@@ -19,7 +19,7 @@ source of truth; the sidebar panel uses the same commands.
 | Who | When | Can |
 |---|---|---|
 | **admin** (HA administrator) | always | everything (what the panel does) |
-| **member** (any other HA user) | only when Configure → **App access** is *Household* | read their own owner's garments (and all zones), phone-tap, **enrol a garment for themselves from a tag they just tapped** (0.2.4), and edit their own garments' name, notes, photos, size and wear_for |
+| **member** (any other HA user) | only when Configure → **App access** is *Household* | read their own owner's garments (and all zones), phone-tap, **enrol a garment for themselves from a tag they just tapped** (0.2.4), edit their own garments' name, notes, photos, size and wear_for, and **use the purchase cards assigned to them** (0.2.6) |
 
 With App access set to *Admins only* (the default), a member gets `unauthorized` for every
 command, and 401/404 from the photo endpoints.
@@ -36,7 +36,8 @@ Admin only, even with *Household*:
 - manual AI describe and re-describe, `garment/describe_fields` and `garment/reset_field`
   (admin-only from 0.2.4);
 - brand, purchase details and uniform;
-- purchase emails, and purchase cards that aren't matched to the member's garments;
+- purchase emails and store settings; assigning cards, quantity, split and merge;
+- purchase cards that aren't assigned to the member (or matched to their garments);
 - other owners' garments.
 
 **AI descriptions for members (0.2.4):** when a member adds the first photo to their own
@@ -63,11 +64,23 @@ Rules:
   - `owner_not_allowed`: another owner was given.
   - `tag_not_yours`: not the member's recent phone tap.
 
+**Purchase cards for members (0.2.6, capabilities `purchase_assign`, `purchase_groups`):**
+
+- An admin assigns a card to an owner (`purchases/assign`). A member sees only cards
+  assigned to their owner (plus cards already matched to their garments), in `data`,
+  `changes` and the photo endpoints. This replaces the 0.2.4 rule that members never see
+  cards.
+- A member may `purchases/match` an assigned card to one of their own garments (to make a
+  garment from it: enrol the tag with `garment/create`, then match), and `purchases/dismiss`
+  it (with `not_clothing` too). Other cards and other garments get `unauthorized`.
+- A card that stops being assigned to the member comes back in `changes` under `deleted`.
+
 ## Commands
 
 All types are prefixed with `laundry_hub/`. "Policy" is the access rule from the table above:
 
 - **read**: anyone allowed in; results are filtered to the caller's owner.
+- **purchase**: admins, or a member acting on a card assigned to their owner (0.2.6).
 - **own**: admins, or a member acting on their own garment.
 - **tap**: admins, or members (actions on own garments only).
 - **admin**: admins only.
@@ -77,15 +90,16 @@ All types are prefixed with `laundry_hub/`. "Policy" is the access rule from the
 What the server supports and who you are.
 
 ```json
-{"api_version": 1, "integration_version": "0.2.5", "wardrobe_enabled": true,
- "capabilities": ["phone_tap", "changes", "if_rev", "member_enroll", "url_import", "ai_describe", "purchases"],
+{"api_version": 1, "integration_version": "0.2.6", "wardrobe_enabled": true,
+ "capabilities": ["phone_tap", "changes", "if_rev", "member_enroll", "url_import", "ai_describe", "purchases", "purchase_groups", "purchase_assign"],
  "role": "member", "owner": "person.alex", "app_access": "household", "rev": 412}
 ```
 
 `capabilities` lists only what this server has *now*:
 
 - `member_enroll` is listed when App access is *Household* (members may enrol their own tags).
-- `purchases` needs a connected mailbox.
+- `purchases` needs a connected mailbox; `purchase_groups` and `purchase_assign` (0.2.6) are
+  listed with it.
 - `ai_describe` needs an AI Task entity.
 - `url_import` and `ai_describe` need Wardrobe on.
 - v0.3 will add `out_state` and `wear_log`. Show a feature only when its capability is listed.
@@ -101,8 +115,9 @@ For a member:
 - `unknown_tags` holds at most the one tag they just tapped with their phone (to enrol it), and
   `last_unknown` is `null`.
 - `owners` holds only theirs.
-- `purchases` is `{connected, cards: [], archived: [], uniform_offers: [], mine: [...]}`, where
-  `mine` holds the cards matched to their garments.
+- `purchases` is `{connected, cards, archived, uniform_offers: [], mine}`: `cards` are the
+  waiting cards assigned to them, `archived` their dismissed or archived ones, and `mine`
+  the matched ones (assigned to them or matched to their garments). No status fields.
 
 Photo URLs in `photo_urls` are pre-signed for 24 h.
 
@@ -209,11 +224,46 @@ with the check summary plus `retried`.
 Purchase cards gain `cut` (0.2.5): the fit or cut printed in the order email ("slim", "tall"),
 or `null`. Like every added field, clients that don't know it should ignore it.
 
+### Purchase cards are groups (0.2.6)
+
+One card per item. Emails about one order (confirmation, shipping, delivery) are the same
+units and never add up; a new order of the same item joins the card. Added fields:
+
+- `quantity`: total units; `quantity_locked`: `true` once set by a person (later emails add
+  history, not units, until unlocked).
+- `history`: one line per purchase, oldest first: `{id, order_ref, order_date, store,
+  unit_price, currency, quantity}`.
+- `matches`: `[{garment_id, units}]`; `remaining`: units neither matched nor dismissed;
+  `dismissed_units`. A card stays `new` until `remaining` is 0. `garment_id` is the first
+  matched garment (unchanged meaning for one-unit cards).
+- `owner`: the assigned person, or `null`; `suggested_owner`: a suggestion for unassigned
+  cards (admins act on it; it's never applied by itself).
+- `brand` is read from the email again (0.2.6); `fit` (the cut mapped to a fit option, or `null`) and `size_cut` (`tall`,
+  `petite`, `plus`, `maternity`, or `null`).
+
+Commands (admin unless noted):
+
+- `purchases/match {card_id, garment_id, units?}` (purchase): `units` 1..N, default all
+  remaining units.
+- `purchases/dismiss {card_id, not_clothing?}` (purchase): dismisses the remaining units.
+- `purchases/set_quantity {card_id, quantity}`: `quantity` 1..999 locks it; `null` unlocks
+  and recounts from the history. Error `quantity_too_low` below the matched units.
+- `purchases/split {card_id, purchase_id}` → `{card, new_card}`. Error `cannot_split`.
+- `purchases/merge {card_id, other_id}` → the kept card (the fuller one). Error
+  `cannot_merge` for matched cards.
+- `purchases/assign {card_id | card_ids, owner}`: `owner` a person entity or `null`.
+  → `{cards}`. Error `invalid_owner`.
+- `purchases/cleanup_seen`: hides the one-time cleanup line (`data.purchases.cleanup`,
+  `{removed, grouped}` or `null`).
+
+All take `if_rev` (of `card_id`).
+
 ### Existing commands
 
 Unchanged from v0.2.2; they gain only `if_rev` / `if_revs` and the policies.
 
 - **enrol** (0.2.4): `garment/create` (admins: any; members: their own recent tap, their own owner)
+- **purchase** (0.2.6): `purchases/match`, `purchases/dismiss`
 - **own**:
   - `garment/update` (members: `name`, `notes` only)
   - `garment/wardrobe` (members: `size`, `wear_for` only)
@@ -223,7 +273,8 @@ Unchanged from v0.2.2; they gain only `if_rev` / `if_revs` and the policies.
   - `garment/describe_fields`, `garment/reset_field` (admin-only from 0.2.4)
   - `reassign`, `zone/remove`, `zone/flash`, `unknown/dismiss`
   - `import_product_url`, `import/apply`, `owner/update`
-  - `purchases/*` (including `purchases/retry_unreadable`, 0.2.4)
+  - `purchases/*` (including `purchases/retry_unreadable`, 0.2.4, and `set_quantity`,
+    `split`, `merge`, `assign`, `cleanup_seen`, 0.2.6), except match and dismiss
 
 ## HTTP
 
@@ -232,7 +283,8 @@ Unchanged from v0.2.2; they gain only `if_rev` / `if_revs` and the policies.
   upload to their own garments only (otherwise 403).
 - `GET /api/laundry_hub/photos/<filename>` serves a photo or thumbnail.
   - Use the signed URLs from `data`, `changes` or `photo/url`, or send a bearer token.
-  - Members only get their own garments' photos, and photos of cards matched to them;
+  - Members only get their own garments' photos, and photos of cards assigned or matched
+    to them;
     anything else is 404.
 - Signed URLs expire after 24 h. Ask `photo/url` again when one has expired.
 

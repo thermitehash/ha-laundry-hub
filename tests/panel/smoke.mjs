@@ -73,10 +73,13 @@ function data(wardrobe) {
     persons: [{ entity_id: "person.heather", name: "Heather" }, { entity_id: "person.sam", name: "Sam" }],
     purchases: wardrobe ? {
       connected: true, provider: "gmail", stores: 3, last_check: iso(12), last_error: null, new_cards: 2,
+      cleanup: { removed: 31, grouped: 10 },
       unreadable: [{ store: "Outdoor Research", date: "2026-11-15T15:00:00+00:00", sender_domain: "outdoorresearch.narvar.com", error: "HomeAssistantError" }],
       cards: [
         { id: "p1", status: "new", store: "Old Navy", store_key: "old_navy", order_ref: "ON-1", order_date: "2026-11-22", currency: "USD", name: `High-Waisted Wow Jeans ${XSS}`, brand: "Old Navy", color: "Black", size: "8 Tall", quantity: 1, unit_price: 44.99, product_url: "https://oldnavy.example/p", photos: ["purchase-p1-a.jpg"], photo_urls: [{ name: "purchase-p1-a.jpg", full: PIXEL, thumb: PIXEL }], garment_id: null, created: iso(60), updated: iso(60), status_changed: iso(60) },
         { id: "p3", status: "new", store: "Blauer", store_key: "blauer", uniform_supplier: true, order_ref: "B-1", order_date: "2026-11-21", currency: "USD", name: "8703 Long Sleeve Shirt", brand: "Blauer", color: "French Blue", size: "L", quantity: 1, unit_price: 64, product_url: null, photos: [], photo_urls: [], garment_id: null, created: iso(100), updated: iso(100), status_changed: iso(100) },
+        { id: "p4", status: "new", store: "Amazon", store_key: "amazon", order_ref: "113-2", order_date: "2026-11-19", currency: "USD", name: "RUMIA Dress", brand: "RUMIA", color: "Green", size: "L", cut: "Tall", quantity: 2, remaining: 2, quantity_locked: true, owner: null, suggested_owner: "person.sam", matches: [], unit_price: 39.99, product_url: null, photos: [], photo_urls: [], garment_id: null, created: iso(95), updated: iso(95), status_changed: iso(95),
+          history: [{ id: "h1", order_ref: "113-1", order_date: "2026-11-18", store: "Amazon", unit_price: 39.99, currency: "USD", quantity: 1 }, { id: "h2", order_ref: "113-2", order_date: "2026-11-19", store: "Amazon", unit_price: 39.99, currency: "USD", quantity: 1 }] },
         { id: "p2", status: "new", store: "Target", store_key: "target", order_ref: "T-9", order_date: "2026-11-20", currency: "USD", name: "Short Sleeve T-Shirt with a rather long product name that wraps", brand: null, color: "White", size: "XS", quantity: 1, unit_price: 8, product_url: null, photos: [], photo_urls: [], garment_id: null, created: iso(90), updated: iso(90), status_changed: iso(90) },
       ],
       archived: [
@@ -211,6 +214,46 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   const rs = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/purchases/restore").pop());
   if (!rs || rs.card_id !== "a1") fail(`${tag}: restore call`);
   await click(page, '[data-act="purchasesView"][data-view="new"]'); await settle(page);
+  // v0.2.6: group card ×N, stepper, history with Split, suggestion, assign, merge, bulk assign.
+  t = await text(page);
+  for (const s of ["×2", "Set by you", "Suggested: Sam", "113-1", "Split", "Assign to…", "Tall"]) if (!t.includes(s)) fail(`${tag}: group card missing "${s}"`);
+  const call = (type) => page.evaluate((ty) => window.__calls.filter((c) => c.type === ty).pop(), type);
+  await click(page, '[data-act="purchaseQty"][data-card="p4"][data-qty="3"]'); await settle(page);
+  let c = await call("laundry_hub/purchases/set_quantity");
+  if (!c || c.card_id !== "p4" || c.quantity !== 3) fail(`${tag}: set_quantity ${JSON.stringify(c)}`);
+  await click(page, '[data-act="purchaseQtyReset"][data-card="p4"]'); await settle(page);
+  c = await call("laundry_hub/purchases/set_quantity");
+  if (!c || c.quantity !== null) fail(`${tag}: unlock ${JSON.stringify(c)}`);
+  await click(page, '[data-act="splitPurchase"][data-card="p4"][data-line="h1"]'); await settle(page);
+  c = await call("laundry_hub/purchases/split");
+  if (!c || c.purchase_id !== "h1") fail(`${tag}: split ${JSON.stringify(c)}`);
+  await click(page, '[data-act="assignSuggested"][data-card="p4"]'); await settle(page);
+  c = await call("laundry_hub/purchases/assign");
+  if (!c || c.card_id !== "p4" || c.owner !== "person.sam") fail(`${tag}: suggested assign ${JSON.stringify(c)}`);
+  await click(page, '[data-act="openSheet"][data-kind="assignPurchase"][data-field="p2"]'); await settle(page);
+  await click(page, '[data-act="assignPurchase"][data-owner="person.heather"]'); await settle(page);
+  c = await call("laundry_hub/purchases/assign");
+  if (!c || JSON.stringify(c.card_ids) !== '["p2"]' || c.owner !== "person.heather") fail(`${tag}: assign ${JSON.stringify(c)}`);
+  await click(page, '[data-act="openSheet"][data-kind="mergePurchase"][data-field="p4"]'); await settle(page);
+  await click(page, '[data-act="mergePurchase"][data-other="p2"]'); await settle(page);
+  c = await call("laundry_hub/purchases/merge");
+  if (!c || c.card_id !== "p4" || c.other_id !== "p2") fail(`${tag}: merge ${JSON.stringify(c)}`);
+  await click(page, '[data-act="togglePurchaseSelectMode"]'); await settle(page);
+  await click(page, '[data-act="togglePurchaseSelect"][data-card="p1"]'); await settle(page);
+  await click(page, '[data-act="togglePurchaseSelect"][data-card="p3"]'); await settle(page);
+  await click(page, '[data-act="openSheet"][data-kind="assignPurchase"][data-field="__selected"]'); await settle(page);
+  await click(page, '[data-act="assignPurchase"][data-owner=""]'); await settle(page);
+  c = await call("laundry_hub/purchases/assign");
+  if (!c || JSON.stringify(c.card_ids) !== '["p1","p3"]' || c.owner !== null) fail(`${tag}: bulk assign ${JSON.stringify(c)}`);
+  await click(page, '[data-act="purchaseOwner"][data-owner="none"]'); await settle(page);
+  await noHScroll(page, `${tag} purchase groups`);
+  await shot(page, `${tag}-purchase-groups`);
+  await click(page, '[data-act="purchaseOwner"][data-owner="all"]'); await settle(page);
+  await click(page, '[data-act="openSheet"][data-kind="matchPurchase"][data-field="p4"]'); await settle(page);
+  await click(page, '[data-act="matchUnits"][data-units="1"]'); await settle(page);
+  await click(page, '[data-act="matchPurchase"][data-card="p4"]'); await settle(page);
+  c = await call("laundry_hub/purchases/match");
+  if (!c || c.card_id !== "p4" || c.units !== 1) fail(`${tag}: match one unit ${JSON.stringify(c)}`);
   await click(page, '[data-act="openSheet"][data-kind="matchPurchase"][data-field="p2"]'); await settle(page);
   await sr(page, "const i = root.querySelector('input[data-input=matchSearch]'); i.value = 'button'; i.dispatchEvent(new Event('input', {bubbles:true}));"); await settle(page);
   const rows = await sr(page, "return [...root.querySelectorAll('[data-act=matchPurchase]')].map(e=>e.dataset.id).join(',')");
@@ -269,7 +312,9 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   t = await text(page);
   for (const s of ["Stations", "Online", "Offline", "Not set up", "Wardrobe catalog"]) if (!t.includes(s)) fail(`${tag} settings: missing "${s}"`);
   const pe = await sr(page, "return root.querySelector('[data-section=purchase-emails]')?.textContent || ''");
-  for (const s of ["Connected", "Stores", "3", "Last check", "12 min ago", "New cards", "Last problem", "None", "Change in Configure", "1 email couldn't be read · Outdoor Research", "Retry unreadable emails"]) if (!pe.includes(s)) fail(`${tag} settings: purchase row missing "${s}"`);
+  for (const s of ["Connected", "Stores", "3", "Last check", "12 min ago", "New cards", "Last problem", "None", "Change in Configure", "1 email couldn't be read · Outdoor Research", "Retry unreadable emails", "Cleaned up: 31 non-clothing removed, 10 duplicates grouped"]) if (!pe.includes(s)) fail(`${tag} settings: purchase row missing "${s}"`);
+  await click(page, '[data-act="cleanupSeen"]'); await settle(page);
+  if (!(await page.evaluate(() => window.__calls.some((c) => c.type === "laundry_hub/purchases/cleanup_seen")))) fail(`${tag}: cleanup_seen call`);
   await click(page, '[data-act="retryUnreadable"]'); await settle(page);
   if (!(await page.evaluate(() => window.__calls.some((c) => c.type === "laundry_hub/purchases/retry_unreadable")))) fail(`${tag}: retry unreadable call`);
   await noHScroll(page, `${tag} settings`);

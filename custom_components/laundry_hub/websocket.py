@@ -21,6 +21,7 @@ from .access import (
     Policy,
     app_access,
     caller_for,
+    can_see_card,
     can_see_garment,
     check,
     member_unknown_tags,
@@ -233,15 +234,22 @@ def filter_for(caller: Caller, hub: LaundryHub, data: dict[str, Any]) -> dict[st
         k: v for k, v in (data.get("owners") or {}).items() if k == caller.owner
     }
     if data.get("purchases") is not None:
+        visible = [
+            c for c in hub.catalog.purchases.values() if can_see_card(caller, hub, c)
+        ]
         data["purchases"] = {
             "connected": data["purchases"].get("connected"),
-            "cards": [],
-            "archived": [],
+            "cards": [
+                hub.purchases.view(c) for c in visible if c.get("status") == "new"
+            ],
+            "archived": [
+                hub.purchases.view(c)
+                for c in visible
+                if c.get("status") in ("dismissed", "archived")
+            ],
             "uniform_offers": [],
             "mine": [
-                hub.purchases.view(c)
-                for c in hub.catalog.purchases.values()
-                if c.get("status") == "matched" and c.get("garment_id") in own
+                hub.purchases.view(c) for c in visible if c.get("status") == "matched"
             ],
         }
     return data
@@ -293,19 +301,24 @@ async def ws_purchases_suggest(
         vol.Optional("if_revs"): _revs,
         vol.Required("card_id"): _str,
         vol.Required("garment_id"): _str,
+        vol.Optional("units"): vol.Any(None, vol.All(int, vol.Range(min=1, max=999))),
     }
 )
 @websocket_api.async_response
-@_with_hub(Policy.ADMIN)
+@_with_hub(Policy.PURCHASE)
 async def ws_purchases_match(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
     msg: _Msg,
     hub: LaundryHub,
 ) -> Any:
-    """Fill a garment from a purchase card (copies photos)."""
+    """Fill a garment from a purchase card (copies photos).
+
+    ``units``: how many of the card's units this garment takes (default: all
+    that are left). A group of N can be matched to up to N garments.
+    """
     garment = hub.resolve_garment(msg["garment_id"])
-    await hub.purchases.async_match(msg["card_id"], garment)
+    await hub.purchases.async_match(msg["card_id"], garment, msg.get("units"))
     return hub.garment_view(garment)
 
 
@@ -319,7 +332,7 @@ async def ws_purchases_match(
     }
 )
 @websocket_api.async_response
-@_with_hub(Policy.ADMIN)
+@_with_hub(Policy.PURCHASE)
 async def ws_purchases_dismiss(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
@@ -391,6 +404,125 @@ async def ws_purchases_retry(
     """Clear the 'couldn't be read' marks and read those emails again."""
     hub.wardrobe.require()
     return await hub.purchases.async_retry_unreadable()
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/purchases/set_quantity",
+        vol.Optional("if_rev"): _rev,
+        vol.Optional("if_revs"): _revs,
+        vol.Required("card_id"): _str,
+        vol.Required("quantity"): vol.Any(
+            None, vol.All(int, vol.Range(min=1, max=999))
+        ),
+    }
+)
+@websocket_api.async_response
+@_with_hub(Policy.ADMIN)
+async def ws_purchases_set_quantity(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Set (and lock) a group's quantity; null unlocks it."""
+    hub.wardrobe.require()
+    card = hub.purchases.set_quantity(msg["card_id"], msg["quantity"])
+    return _sign_card(hub.purchases.view(card), _signer(hass, connection))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/purchases/split",
+        vol.Optional("if_rev"): _rev,
+        vol.Optional("if_revs"): _revs,
+        vol.Required("card_id"): _str,
+        vol.Required("purchase_id"): _str,
+    }
+)
+@websocket_api.async_response
+@_with_hub(Policy.ADMIN)
+async def ws_purchases_split(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Pull one purchase out of a group into its own card."""
+    hub.wardrobe.require()
+    twin = await hub.purchases.async_split(msg["card_id"], msg["purchase_id"])
+    sign = _signer(hass, connection)
+    return {
+        "card": _sign_card(hub.purchases.view(hub.purchases.get(msg["card_id"])), sign),
+        "new_card": _sign_card(hub.purchases.view(twin), sign),
+    }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/purchases/merge",
+        vol.Optional("if_rev"): _rev,
+        vol.Optional("if_revs"): _revs,
+        vol.Required("card_id"): _str,
+        vol.Required("other_id"): _str,
+    }
+)
+@websocket_api.async_response
+@_with_hub(Policy.ADMIN)
+async def ws_purchases_merge(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Combine two cards into one group (the fuller card is kept)."""
+    hub.wardrobe.require()
+    card = await hub.purchases.async_merge(msg["card_id"], msg["other_id"])
+    return _sign_card(hub.purchases.view(card), _signer(hass, connection))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/purchases/assign",
+        vol.Optional("if_rev"): _rev,
+        vol.Optional("if_revs"): _revs,
+        vol.Exclusive("card_id", "cards"): _str,
+        vol.Exclusive("card_ids", "cards"): vol.All([_str], vol.Length(min=1, max=500)),
+        vol.Required("owner"): _opt_str,
+    }
+)
+@websocket_api.async_response
+@_with_hub(Policy.ADMIN)
+async def ws_purchases_assign(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Assign cards to a household member (owner null = unassigned)."""
+    hub.wardrobe.require()
+    ids = msg.get("card_ids") or ([msg["card_id"]] if msg.get("card_id") else [])
+    if not ids:
+        raise hub_validation("invalid_format", "Give card_id or card_ids")
+    cards = hub.purchases.assign(ids, msg.get("owner"))
+    sign = _signer(hass, connection)
+    return {"cards": [_sign_card(hub.purchases.view(c), sign) for c in cards]}
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/purchases/cleanup_seen"}
+)
+@websocket_api.async_response
+@_with_hub(Policy.ADMIN)
+async def ws_purchases_cleanup_seen(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """The one-time cleanup result was shown; stop showing it."""
+    hub.purchases.cleanup_seen()
+    return {}
 
 
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/purchases/check"})
@@ -1029,7 +1161,7 @@ def capabilities(hub: LaundryHub) -> list[str]:
         if hub.wardrobe.ai_entity:
             caps.append("ai_describe")
         if hub.purchases.connected:
-            caps.append("purchases")
+            caps.extend(["purchases", "purchase_groups", "purchase_assign"])
     return caps
 
 
@@ -1089,14 +1221,14 @@ async def ws_changes(
         card = hub.catalog.purchases.get(cid)
         if card is None:
             continue
-        garment = hub.catalog.garments.get(str(card.get("garment_id")))
-        visible = caller.is_admin or (
-            card.get("status") == "matched"
-            and garment is not None
-            and can_see_garment(caller, garment)
-        )
-        if visible:
+        if can_see_card(caller, hub, card):
             purchases.append(_sign_card(hub.purchases.view(card), sign))
+        else:
+            # Not (or no longer) assigned to the member: tell the app to drop it.
+            meta = revs.meta("purchase", cid) or {"rev": 0}
+            hidden.append(
+                {"id": cid, "kind": "purchase", "rev": meta["rev"], "deleted": True}
+            )
     tombstones = revs.tombstones_since(since)
     if not caller.is_admin:
         tombstones = [
@@ -1209,6 +1341,11 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_import_apply,
         ws_owner_update,
         ws_purchases_suggest,
+        ws_purchases_set_quantity,
+        ws_purchases_split,
+        ws_purchases_merge,
+        ws_purchases_assign,
+        ws_purchases_cleanup_seen,
         ws_purchases_match,
         ws_purchases_dismiss,
         ws_purchases_check,

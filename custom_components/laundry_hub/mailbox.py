@@ -134,6 +134,7 @@ class Header:
     subject: str
     date: datetime | None
     sender_name: str = ""  # display name only (Shopify shop matching); never stored
+    sender_local: str = ""  # address local part (Shopify shop id); never stored
 
 
 # --- logging guard -----------------------------------------------------------
@@ -184,13 +185,19 @@ def _words(terms: list[str]) -> str:
     return " OR ".join(f'"{t}"' if " " in t else t for t in terms)
 
 
-def gmail_shopify_query(names: list[str], days: int, keywords: list[str]) -> str:
+def gmail_shopify_query(
+    names: list[str], days: int, keywords: list[str], ids: list[str] | None = None
+) -> str:
     """X-GM-RAW query for Shopify shops: the shared sender plus the shop names.
 
     Gmail matches the names anywhere in the message, so this only narrows the
-    search; the header check (display name or subject) decides.
+    search; the header check (shop id, display name or subject) decides. A
+    known shop id adds ``from:store+<id>@``: those subjects may name no store.
     """
-    query = f"from:{SHOPIFY_DOMAIN} ({_words(names)}) newer_than:{max(1, days)}d"
+    parts = [f"from:{SHOPIFY_DOMAIN} ({_words(names)})"] if names else []
+    parts += [f"from:store+{shop}@" for shop in ids or []]
+    joined = parts[0] if len(parts) == 1 else f"({' OR '.join(parts)})"
+    query = f"{joined} newer_than:{max(1, days)}d"
     if keywords:
         query += f" subject:({_words(keywords)})"
     return query
@@ -252,7 +259,13 @@ def parse_headers(uid: int, raw: bytes) -> Header:
         subject=_decode_header(str(message.get("Subject") or "")),
         date=when,
         sender_name=parseaddr(_decode_header(from_header))[0],
+        sender_local=_local_part(from_header),
     )
+
+
+def _local_part(from_header: str | None) -> str:
+    _, address = parseaddr(_decode_header(from_header))
+    return address.rsplit("@", 1)[0].strip().lower() if "@" in address else ""
 
 
 # --- BODYSTRUCTURE -----------------------------------------------------------
@@ -415,13 +428,17 @@ class MailboxSession:
         return sorted(found)
 
     async def search_shopify(
-        self, names: list[str], days: int, keywords: list[str]
+        self,
+        names: list[str],
+        days: int,
+        keywords: list[str],
+        ids: list[str] | None = None,
     ) -> list[int]:
         """Shopify mail that may be from these shops (headers decide later)."""
-        if not names:
+        if not names and not ids:
             return []
         if self.account.is_gmail:
-            query = gmail_shopify_query(names, days, keywords)
+            query = gmail_shopify_query(names, days, keywords, ids)
             return await self.search("X-GM-RAW", imap_quote(query))
         since = imap_date(date.today() - timedelta(days=max(1, days)))
         return await self.search("SINCE", since, "FROM", imap_quote(SHOPIFY_DOMAIN))

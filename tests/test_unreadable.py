@@ -272,7 +272,7 @@ def test_loose_values_still_make_a_card() -> None:
     # v0.2.5: structures require every key (empty text is fine, and providers
     # don't validate answers) and take prices as text.
     row = dict.fromkeys(
-        ("name", "is_apparel", "quantity", "colour", "size", "cut", "product_url"), ""
+        ("name", "quantity", "line_total", "colour", "size", "cut", "brand"), ""
     )
-    row.update(unit_price="$12.99", is_apparel=True)
+    row.update(unit_price="$12.99", is_apparel=True, is_health=False, product_url="")
     assert extract.item_structure()({"items": [row]}) == {"items": [row]}

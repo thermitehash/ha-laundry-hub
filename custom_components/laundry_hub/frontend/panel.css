@@ -213,3 +213,13 @@ button.pcard:focus-visible, button.pcard[aria-pressed="true"] { border-color: va
 .origin { display: flex; gap: 8px; align-items: center; color: var(--hub-text-muted); font-size: var(--hub-text-sm); }
 .pick-row { display: flex; align-items: center; gap: var(--hub-space-2); min-height: var(--hub-touch); padding: 6px 8px; border-radius: var(--hub-radius-control); border: 1px solid var(--app-border); background: var(--hub-card); color: inherit; cursor: pointer; }
 .offer { align-items: center; gap: var(--hub-space-2); border: 1px solid var(--app-accent-tint); }
+
+/* v0.2.6: purchase groups, history and assignment */
+.pcard .qty { display: inline-block; font-weight: 600; font-size: var(--hub-text-sm); color: var(--app-accent); white-space: nowrap; }
+.stepper { display: inline-flex; align-items: center; gap: 4px; }
+.stepper .value { min-width: 2.5ch; text-align: center; font-weight: 600; }
+.history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.history li { display: flex; gap: var(--hub-space-2); align-items: center; font-size: var(--hub-text-sm); color: var(--hub-text-muted); }
+.history li span { flex: 1; min-width: 0; }
+.suggest { border-style: dashed; }
+.btn.small { padding: 0 var(--hub-space-3); font-size: var(--hub-text-sm); }

@@ -459,6 +459,18 @@
     },
     "tag_not_yours": {
       "message": "Tap the new tag with your phone first, then add it."
+    },
+    "quantity_too_low": {
+      "message": "Some of these are already matched to garments; the quantity can't be lower than that."
+    },
+    "cannot_split": {
+      "message": "That purchase can't be split off."
+    },
+    "cannot_merge": {
+      "message": "Those purchase cards can't be merged."
+    },
+    "unknown_purchase_line": {
+      "message": "That purchase isn't in this card."
     }
   },
   "issues": {

@@ -15,9 +15,14 @@ Shared sending platforms are never matched on their own:
   many brands from per-brand subdomains, so only those full subdomains are
   listed (``landsend.narvar.com``), never the bare platform domain.
 * **Shopify** (``shopifyemail.com``) sends for thousands of shops from the same
-  address. A ``kind="shopify"`` entry matches only when the sender is on
-  ``shopifyemail.com`` *and* the shop's name appears as whole words in the
-  From display name or the Subject.
+  domain. A ``kind="shopify"`` entry matches only when the sender is on
+  ``shopifyemail.com`` *and* either the shop id in the plus-address
+  (``store+6723108924@t.shopifyemail.com``) is the shop's known id, or the
+  shop's name appears as whole words in the From display name or the Subject.
+  Shop ids are built in for some shops and learned on the first name match
+  (v0.2.6). A shop whose id is known never matches mail with another id.
+
+Pharmacy mail (Amazon Pharmacy) is never read, whatever is opted in (v0.2.6).
 """
 
 from __future__ import annotations
@@ -55,6 +60,7 @@ class StoreInfo:
     keywords: tuple[str, ...] = ORDER_KEYWORDS
     uniform_supplier: bool = False
     kind: str = "domain"  # "domain" or "shopify" (matched by name, see above)
+    shop_ids: tuple[str, ...] = ()  # Shopify plus-address ids (v0.2.6)
 
 
 CATALOG: tuple[StoreInfo, ...] = (
@@ -132,6 +138,15 @@ CATALOG: tuple[StoreInfo, ...] = (
     StoreInfo("underoutfit", "Underoutfit", ("underoutfit.com",)),
     StoreInfo("truekind", "Truekind", ("truekind.com",)),
     StoreInfo("cinderella_shoes", "Cinderella Shoes", ("cinderellashoes.com",)),
+    # Tall women's apparel (v0.2.6). Orders come through Shopify with the
+    # display name "Amalli Talli"; the subjects never name the store.
+    StoreInfo(
+        "amalli_talli",
+        "Amalli Talli",
+        (SHOPIFY_DOMAIN, "amallitalli.com"),
+        kind="shopify",
+        shop_ids=("6723108924",),
+    ),
     # Uniform suppliers: garments from them start with "uniform" ticked.
     StoreInfo("blauer", "Blauer", ("blauer.com",), uniform_supplier=True),
     StoreInfo(
@@ -147,6 +162,31 @@ BY_KEY: dict[str, StoreInfo] = {store.key: store for store in CATALOG}
 _DOMAIN = re.compile(
     r"^(?=.{4,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
 )
+
+
+_SHOP_ID = re.compile(r"^store\+(\d{4,20})$", re.IGNORECASE)
+
+
+def shop_id(sender_local: str | None) -> str | None:
+    """The Shopify shop id in a plus-address local part (``store+123`` → 123)."""
+    match = _SHOP_ID.match((sender_local or "").strip())
+    return match.group(1) if match else None
+
+
+PHARMACY_DOMAINS = ("pharmacy.amazon.com",)
+
+
+def is_pharmacy(
+    sender_local: str | None, sender_domain: str | None, sender_name: str | None = ""
+) -> bool:
+    """Amazon Pharmacy mail: never read, stored or logged by name (v0.2.6)."""
+    domain = (sender_domain or "").lower()
+    local = (sender_local or "").lower()
+    if any(domain_matches(domain, d) for d in PHARMACY_DOMAINS):
+        return True
+    if local.startswith("pharmacy") and domain_matches(domain, "amazon.com"):
+        return True
+    return name_in("Amazon Pharmacy", sender_name)
 
 
 def is_uniform_supplier(store_key: str | None) -> bool:
@@ -216,6 +256,7 @@ class OptedIn:
     store_keys: tuple[str, ...]
     custom_domains: tuple[str, ...]
     shopify_names: tuple[str, ...] = ()
+    learned_ids: tuple[tuple[str, str], ...] = ()  # (store key, shop id), v0.2.6
 
     def __post_init__(self) -> None:
         """Shared platforms are never a sender on their own, even from storage."""
@@ -232,6 +273,18 @@ class OptedIn:
         out += [(f"shopify:{n.casefold()}", n) for n in self.shopify_names]
         return out
 
+    def shop_ids(self) -> dict[str, set[str]]:
+        """Known shop ids per opted-in Shopify store key (built in + learned)."""
+        out: dict[str, set[str]] = {}
+        keys = {key for key, _name in self.shopify()}
+        for store in self.stores():
+            if store.kind == "shopify" and store.shop_ids:
+                out.setdefault(store.key, set()).update(store.shop_ids)
+        for key, value in self.learned_ids:
+            if key in keys:
+                out.setdefault(key, set()).add(value)
+        return out
+
     def count(self) -> int:
         """Stores + custom domains + Shopify names (for the status line)."""
         return len(self.stores()) + len(self.custom_domains) + len(self.shopify_names)
@@ -240,9 +293,9 @@ class OptedIn:
         """Every opted-in sender domain (Shopify shops are searched by name)."""
         out: list[str] = []
         for store in self.stores():
-            if store.kind == "shopify":
-                continue
-            out.extend(d for d in store.domains if d not in out)
+            # A Shopify shop may also send from its own domain (Amalli Talli).
+            own = [d for d in store.domains if d != SHOPIFY_DOMAIN]
+            out.extend(d for d in own if d not in out)
         out.extend(d for d in self.custom_domains if d not in out)
         return out
 
@@ -260,23 +313,34 @@ class OptedIn:
         sender_domain: str | None,
         sender_name: str | None = None,
         subject: str | None = None,
+        sender_local: str | None = None,
     ) -> tuple[str, str] | None:
         """(store key, store name) for an opted-in sender, else None.
 
-        Shopify mail matches only by shop name in the display name or subject;
-        any other Shopify mail is rejected like a non-opted sender.
+        Shopify mail matches by the shop id in the plus-address, else by shop
+        name in the display name or subject (unless that shop's id is known
+        and differs). Any other Shopify mail is rejected like a non-opted
+        sender, and pharmacy mail is never matched.
         """
-        if not sender_domain:
+        if not sender_domain or is_pharmacy(sender_local, sender_domain, sender_name):
             return None
         if domain_matches(sender_domain, SHOPIFY_DOMAIN):
-            for key, name in self.shopify():
+            known = self.shop_ids()
+            found = shop_id(sender_local)
+            shops = self.shopify()
+            if found:
+                for key, name in shops:
+                    if found in known.get(key, set()):
+                        return key, name
+            for key, name in shops:
+                if found and known.get(key) and found not in known[key]:
+                    continue  # another shop using this one's name
                 if name_in(name, sender_name, subject):
                     return key, name
             return None
         for store in self.stores():
-            if store.kind != "shopify" and any(
-                domain_matches(sender_domain, d) for d in store.domains
-            ):
+            own = [d for d in store.domains if d != SHOPIFY_DOMAIN]
+            if any(domain_matches(sender_domain, d) for d in own):
                 return store.key, store.name
         for domain in self.custom_domains:
             if domain_matches(sender_domain, domain):
