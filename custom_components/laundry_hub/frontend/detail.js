@@ -127,12 +127,15 @@ function wardrobeSection(ctx, g) {
 // replace or remove a tag.
 function quickActions(ctx, g) {
   const { lib } = ctx;
-  if (g.tagged !== false) return "";
+  const untagged = g.tagged === false;
   const when = g.state_updated ? `Set by hand ${lib.timeAgo(g.state_updated)}` : "Not set yet";
   const stale = g.state_updated && g.state_confidence < 1 ? " · may be out of date" : "";
-  return `<div class="card stack" data-section="quick-actions"><div class="stack" style="gap:2px"><strong>Laundry</strong><span class="sub">${lib.esc(when + stale)}</span></div>
-    <div class="row wrap"><button type="button" class="btn" data-act="manualState" data-garment="${g.id}" data-action="to_laundry" aria-pressed="${g.state === "in_wash"}">To laundry</button>
-      <button type="button" class="btn" data-act="manualState" data-garment="${g.id}" data-action="put_away" aria-pressed="${g.state === "put_away"}">Clean / put away</button></div></div>`;
+  const worn = g.wear_count ? `Worn ${g.wear_count} time${g.wear_count === 1 ? "" : "s"} · last ${lib.timeAgo(g.last_worn)}` : "Not worn yet";
+  return `<div class="card stack" data-section="quick-actions"><div class="stack" style="gap:2px"><strong>${untagged ? "Laundry" : "Wear"}</strong>
+      <span class="sub">${lib.esc(untagged ? `${when}${stale} · ${worn}` : worn)}</span></div>
+    <div class="row wrap"><button type="button" class="btn" data-act="woreIt" data-garment="${g.id}" aria-pressed="${Boolean(g.worn_since)}">Wore it</button>
+      ${untagged ? `<button type="button" class="btn" data-act="manualState" data-garment="${g.id}" data-action="to_laundry" aria-pressed="${g.state === "in_wash"}">To laundry</button>
+      <button type="button" class="btn" data-act="manualState" data-garment="${g.id}" data-action="put_away" aria-pressed="${g.state === "put_away" && !g.worn_since}">Clean / put away</button>` : ""}</div></div>`;
 }
 
 function tagSection(ctx, g) {
@@ -142,12 +145,16 @@ function tagSection(ctx, g) {
   const tags = (g.uids || []).map((u) => `<span class="chip static" style="font-family:monospace">${lib.esc(u)}</span>`).join("");
   const body = waiting
     ? `<div class="tagbox"><strong>Waiting for a tap…</strong><span class="hint">Tap the tag on any station or with the app (until ${lib.esc(new Date(data.link.expires).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}).</span>
-        <form data-submit="typedTag" data-garment="${g.id}" class="row wrap"><input class="input" name="uid" placeholder="Or type the tag ID" autocomplete="off" style="flex:1 1 160px"><button class="btn">Attach</button></form>
-        <button type="button" class="btn" data-act="cancelAttach" data-garment="${g.id}">Cancel</button></div>`
+        <div class="row wrap"><button type="button" class="btn" data-act="cancelAttach" data-garment="${g.id}">Cancel</button></div>
+        <details class="more"><summary>Advanced: type a tag ID</summary>
+          <form data-submit="typedTag" data-garment="${g.id}" class="row wrap"><input class="input" name="uid" placeholder="Tag ID" autocomplete="off" style="flex:1 1 160px"><button class="btn">Attach</button></form></details></div>`
     : g.tagged === false
-      ? `<div class="row wrap"><span class="notag-inline">No tag</span><span class="spacer"></span><button type="button" class="btn primary" data-act="attachTag" data-garment="${g.id}">Attach tag</button></div>`
+      ? `<div class="row wrap"><span class="notag-inline">No tag</span><span class="spacer"></span>
+          <button type="button" class="btn" data-act="openSheet" data-kind="moveTag" data-field="${g.id}">Move tag here</button>
+          <button type="button" class="btn primary" data-act="attachTag" data-garment="${g.id}">Attach tag</button></div>`
       : `<div class="row wrap">${tags}<span class="spacer"></span>
           <button type="button" class="btn" data-act="attachTag" data-garment="${g.id}" data-replace="1">Replace tag</button>
+          <button type="button" class="btn" data-act="openSheet" data-kind="moveTag" data-field="${g.id}">Move tag here</button>
           <button type="button" class="btn" data-act="removeTag" data-garment="${g.id}">Remove tag</button></div>`;
   const move = conflict ? `<div class="row wrap"><span style="flex:1">That tag belongs to <strong>${lib.esc(conflict.name)}</strong>.</span>
       <button type="button" class="btn primary" data-act="moveTag" data-garment="${g.id}">Move tag here</button></div>` : "";
@@ -218,6 +225,17 @@ export const actions = {
   async manualState(ctx, el) {
     const res = await ctx.ws("garment/manual_state", { garment_id: el.dataset.garment, action: el.dataset.action });
     if (res) { ctx.toast(el.dataset.action === "to_laundry" ? "In the laundry" : "Clean and put away"); ctx.reload(); }
+  },
+  async woreIt(ctx, el) {
+    const res = await ctx.ws("garment/wear", { garment_id: el.dataset.garment });
+    if (!res) return;
+    ctx.reload();
+    ctx.toast(`Wore ${res.garment.name}`, false, {
+      label: "Undo",
+      run: async () => {
+        if (await ctx.ws("garment/wear_undo", { garment_id: res.garment.id, wear_id: res.wear.id })) { ctx.toast("Wear undone"); ctx.reload(); }
+      },
+    });
   },
   async attachTag(ctx, el) {
     ctx.state.tagConflict = null;

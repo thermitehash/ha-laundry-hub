@@ -1,6 +1,6 @@
 # Laundry Hub build report: v0.2.8
 - Version: 0.2.8 / Date: 2026-11-29 / Repo: https://github.com/thermitehash/ha-laundry-hub
-- PR: https://github.com/thermitehash/ha-laundry-hub/pull/11 (not merged: one open question on wear tracking). v0.2.7 was merged in PR #10 (`c9e6990`) and released as `v0.2.7`.
+- PR: https://github.com/thermitehash/ha-laundry-hub/pull/11. Heather's answers: foundation-only wears, merge on green, 1-year purge kept, a move-tag picker, and she edits the v0.2.6 page herself. v0.2.7 was merged in PR #10 (`c9e6990`) and released as `v0.2.7`.
 - CI: workflow **Validate** on PR #11 (see the latest run)
 
 ## Summary
@@ -20,6 +20,13 @@
 - **Members:** create untagged garments for themselves, set manual states, and attach/replace/remove tags on their own garments.
 - **Not clothing** keeps the card's photos; archived and dismissed cards are purged with their photos after a year.
 - **v0.2.6 release notes:** "Install v0.2.7 or later instead" line added.
+- **Wears:**
+  - "Wore it" on every garment, with Undo on the toast for 10 s;
+  - wear-log entries `{id, at, source}` (v0.3 adds `station`), sent as `wear_count`, `last_worn` and `worn_since`;
+  - capability `wear_log`;
+  - an internal, tested ranking helper that weighs stale untagged states down.
+- **Move tag here** is a picker of tagged garments with one confirm; typing an ID is an advanced fallback.
+- **Settings line:** "Archived cards and their photos are deleted 1 year after archiving."
 - **Bug, "[object Object]" toast at startup:**
   - one `lib.errorText()` for every error path, with readable text for HA's message-less rejections;
   - every failure is logged with its command;
@@ -27,15 +34,18 @@
 - **Purchases easy to find:** the Home card "Purchases · N to review" with thumbnails, a Closet tab badge, and the `?tab=closet&view=purchases` deep link.
 
 ## Tests
-- 386 pytest (coverage 95 %).
-- New `tests/test_v028.py` (7):
+- 389 pytest (coverage 95 %).
+- New `tests/test_v028.py` (10):
   - migration keeps ids, tags, photos, history and entity unique_ids, and old uid refs work;
   - create untagged from the panel API and from a purchase card;
   - manual states, counts and sensors ignore untagged garments, the freshness weighting, never missing;
   - attach, the 2-minute window, tag_in_use → move, replace, remove;
   - unknown tag → ranked untagged garments → link;
   - member rights;
-  - Not clothing → Restore keeps the same photo file, and the purge removes it after a year.
+  - Not clothing → Restore keeps the same photo file, and the purge removes it after a year;
+  - Wore it, undo and the log shape, including a station entry and skipped junk;
+  - the ranking helper (a stale untagged state weighed down, recently worn);
+  - members wear only their own.
 - The panel smoke test covers:
   - the No tag badge and filter;
   - quick actions; attach, waiting, then the conflict → Move tag here; Replace/Remove on a tagged garment;
@@ -43,12 +53,15 @@
   - errorText for `{code:3}`, nested `{error:{message}}`, plain objects and empty objects (never "[object Object]");
   - a load during a reconnect retries with no toast;
   - overlapping loads collapse to one call;
-  - the Home Purchases card count, opening Purchases, the Closet tab badge and the deep link.
+  - the Home Purchases card count, opening Purchases, the Closet tab badge and the deep link;
+  - Wore it → Undo on the toast;
+  - the move-tag picker with its confirm;
+  - the Settings purge line.
 
 ## Needs a person
 - Add a garment without a tag, set "To laundry" / "Clean / put away", then Attach tag by tapping it at a station within 2 minutes.
 - Tap a brand-new tag: the notification offers "Link to an untagged garment…".
-- Edit the published v0.2.6 release page to add the "Install v0.2.7 or later instead" line (the file is updated; the page isn't regenerated).
+- Heather edits the published v0.2.6 release page to add the "Install v0.2.7 or later instead" line.
 
 ---
 

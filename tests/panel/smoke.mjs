@@ -100,6 +100,8 @@ async function setup(browser, viewport, wardrobe, opts = {}) {
   const page = await context.newPage();
   const errors = [];
   const logged = []; // the panel's own "Laundry Hub: <command> failed" logs (handled errors)
+  const dialogs = [];
+  page.on("dialog", (d) => { dialogs.push(d.message()); d.accept(); });
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => {
     if (m.type() !== "error") return;
@@ -137,6 +139,8 @@ async function setup(browser, viewport, wardrobe, opts = {}) {
         if (msg.type === "laundry_hub/garment/create") return { ...payload.garments[0], id: "g01" };
         if (msg.type === "laundry_hub/garment/attach_tag" && msg.uid === "INUSE" && !msg.move) throw { code: "tag_in_use", message: "That tag belongs to Red sweater; move it here instead?" };
         if (msg.type === "laundry_hub/garment/attach_tag") return msg.uid ? { linked: true, garment: payload.garments[0] } : { linked: false, waiting_until: new Date(Date.now() + 120000).toISOString() };
+        if (msg.type === "laundry_hub/garment/wear") return { wear: { id: "w1", at: new Date().toISOString(), source: "manual" }, garment: payload.garments.find((g) => g.id === msg.garment_id) };
+        if (msg.type === "laundry_hub/garment/wear_undo") return payload.garments.find((g) => g.id === msg.garment_id);
         if (msg.type === "laundry_hub/unknown/link_candidates") return { garments: payload.garments.filter((g) => g.tagged === false) };
         return { moved: 1, updated: 1 };
       },
@@ -152,7 +156,7 @@ async function setup(browser, viewport, wardrobe, opts = {}) {
     el.hass = hass;
   }, { payload: data(wardrobe), opts });
   await page.waitForFunction(() => document.querySelector("laundry-hub-panel")?.shadowRoot?.querySelector("main .page-head"));
-  return { context, page, errors, logged };
+  return { context, page, errors, logged, dialogs };
 }
 
 const sr = (page, fn, arg) => page.evaluate(([f, a]) => {
@@ -170,7 +174,7 @@ async function shot(page, name) { await page.screenshot({ path: path.join(SHOTS,
 
 const browser = await chromium.launch();
 for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
-  const { context, page, errors } = await setup(browser, { width: vw, height: vh }, true);
+  const { context, page, errors, dialogs } = await setup(browser, { width: vw, height: vh }, true);
 
   // Home
   let t = await text(page);
@@ -332,10 +336,26 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   if (!uc || uc.uid !== "INUSE" || uc.move !== true) fail(`${tag}: move call ${JSON.stringify(uc)}`);
   await page.evaluate(() => { window.__payload.link = null; window.__push({ changed: true }); });
   await page.waitForTimeout(400);
+  // "Move tag here": a picker of tagged garments, one confirm, no typing.
+  await click(page, '[data-act="openSheet"][data-kind="moveTag"][data-field="g06"]'); await settle(page);
+  if (!(await text(page)).includes("Pick the garment the tag is on now")) fail(`${tag}: move-tag picker`);
+  await click(page, '[data-act="pickMoveTag"][data-id="g02"]'); await settle(page);
+  if (!dialogs.some((d) => d === "Move tag from Red sweater to Linen shirt?")) fail(`${tag}: move confirm ${dialogs.join(" | ")}`);
+  uc = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/attach_tag").pop());
+  if (!uc || uc.garment_id !== "g06" || uc.uid !== "04A1B2C3D4E502" || uc.move !== true) fail(`${tag}: move from picker ${JSON.stringify(uc)}`);
   await click(page, '[data-act="closeGarment"]'); await settle(page);
   await click(page, '.gcard[data-id="g01"]'); await settle(page);
   t = await text(page);
-  if (!t.includes("Replace tag") || !t.includes("Remove tag") || t.includes("Clean / put away")) fail(`${tag}: tagged detail tag section`);
+  if (!t.includes("Replace tag") || !t.includes("Remove tag") || !t.includes("Move tag here") || t.includes("Clean / put away")) fail(`${tag}: tagged detail tag section`);
+  // "Wore it" on a tagged garment, with Undo on the toast.
+  if (!t.includes("Wore it") || !t.includes("Not worn yet")) fail(`${tag}: wore-it on tagged garment`);
+  await click(page, '[data-act="woreIt"][data-garment="g01"]'); await page.waitForTimeout(200);
+  uc = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/wear").pop());
+  if (!uc || uc.garment_id !== "g01") fail(`${tag}: wear call ${JSON.stringify(uc)}`);
+  if (!(await sr(page, "return root.querySelector('.toast .toast-action')?.textContent || ''")).includes("Undo")) fail(`${tag}: no Undo on the wear toast`);
+  await click(page, '[data-act="toastAction"]'); await page.waitForTimeout(200);
+  uc = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/wear_undo").pop());
+  if (!uc || uc.garment_id !== "g01" || uc.wear_id !== "w1") fail(`${tag}: wear undo ${JSON.stringify(uc)}`);
   await click(page, '[data-act="closeGarment"]'); await settle(page);
 
   // Add: listening, then a live unknown tap fills the UID
@@ -388,7 +408,7 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   t = await text(page);
   for (const s of ["Stations", "Online", "Offline", "Not set up", "Wardrobe catalog"]) if (!t.includes(s)) fail(`${tag} settings: missing "${s}"`);
   const pe = await sr(page, "return root.querySelector('[data-section=purchase-emails]')?.textContent || ''");
-  for (const s of ["Connected", "Stores", "3", "Last check", "12 min ago", "New cards", "Last problem", "None", "Change in Configure", "1 email couldn't be read · Outdoor Research", "Retry unreadable emails", "Cleaned up: 31 marked not clothing (restorable), 2 health items removed, 10 duplicates grouped"]) if (!pe.includes(s)) fail(`${tag} settings: purchase row missing "${s}"`);
+  for (const s of ["Connected", "Stores", "3", "Last check", "12 min ago", "New cards", "Last problem", "None", "Change in Configure", "1 email couldn't be read · Outdoor Research", "Retry unreadable emails", "Cleaned up: 31 marked not clothing (restorable), 2 health items removed, 10 duplicates grouped", "Archived cards and their photos are deleted 1 year after archiving."]) if (!pe.includes(s)) fail(`${tag} settings: purchase row missing "${s}"`);
   await click(page, '[data-act="cleanupSeen"]'); await settle(page);
   if (!(await page.evaluate(() => window.__calls.some((c) => c.type === "laundry_hub/purchases/cleanup_seen")))) fail(`${tag}: cleanup_seen call`);
   // v0.2.7: the AI was unavailable after the retries: a note and "Reclassify old cards".

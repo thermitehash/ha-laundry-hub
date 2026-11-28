@@ -417,6 +417,32 @@ export async function loadCandidates(ctx, uid) {
   if (res && ctx.state.sheet?.kind === "linkTag") { ctx.state.sheet.candidates = res.garments; ctx.render(); }
 }
 
+// v0.2.8: "Move tag here" picks the garment the tag is on now (no typing).
+function moveTagSheet(ctx) {
+  const { lib, data, state } = ctx;
+  const target = ctx.garment(state.sheet.field);
+  if (!target) return `<p>That garment is gone.</p>`;
+  const q = (state.sheet.q || "").toLowerCase().trim();
+  const rows = [];
+  for (const g of data.garments) {
+    if (g.id === target.id || !(g.uids || []).length) continue;
+    if (q && !`${g.name} ${ctx.personName(g.owner)} ${g.description?.type || ""}`.toLowerCase().includes(q)) continue;
+    for (const uid of g.uids) rows.push({ g, uid, many: g.uids.length > 1 });
+  }
+  rows.sort((a, b) => a.g.name.localeCompare(b.g.name));
+  return `<div class="sheet-head"><h2>Move a tag to “${lib.esc(target.name)}”</h2><button type="button" class="icon-btn plain" data-act="closeSheet" aria-label="Close">${lib.ICON.close}</button></div>
+    <span class="hint">Pick the garment the tag is on now.</span>
+    <label class="search">${lib.ICON.search}<span class="sr-only">Search garments</span>
+      <input type="search" data-input="matchSearch" data-keep="matchSearch" placeholder="Search garments" value="${lib.esc(state.sheet.q || "")}"></label>
+    <div class="stack">${rows.slice(0, 60).map(({ g, uid, many }) => {
+      const url = lib.coverThumb(g);
+      const meta = [ctx.personName(g.owner), g.description?.type, many ? `tag …${uid.slice(-6)}` : null].filter(Boolean).join(" · ");
+      return `<button type="button" class="pick-row" data-act="pickMoveTag" data-id="${g.id}" data-uid="${lib.esc(uid)}">
+        <span class="avatar">${url ? `<img src="${lib.esc(url)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">` : lib.esc(lib.initials(g.name))}</span>
+        <span style="flex:1;text-align:left">${lib.esc(g.name)}</span><span class="sub">${lib.esc(meta)}</span></button>`;
+    }).join("") || `<span class="hint">No other garment has a tag.</span>`}</div>`;
+}
+
 export function renderSheet(ctx) {
   const { lib, state } = ctx;
   const sheet = state.sheet;
@@ -427,6 +453,7 @@ export function renderSheet(ctx) {
   else if (sheet.kind === "matchPurchase") inner = matchSheet(ctx);
   else if (sheet.kind === "assignPurchase") inner = assignSheet(ctx);
   else if (sheet.kind === "linkTag") inner = linkTagSheet(ctx);
+  else if (sheet.kind === "moveTag") inner = moveTagSheet(ctx);
   else if (sheet.kind === "mergePurchase") inner = mergeSheet(ctx);
   else if (sheet.kind === "confirmDelete") {
     inner = `<h2>Delete ${state.select.ids.size} garment(s)?</h2><p class="hint" style="margin:0">Their tags become unknown again. This can't be undone.</p>
@@ -573,6 +600,14 @@ export const actions = {
   openSheet(ctx, el) {
     ctx.update({ sheet: { kind: el.dataset.kind, field: el.dataset.field || null, picked: [] } });
     if (el.dataset.kind === "linkTag") loadCandidates(ctx, el.dataset.field);
+  },
+  async pickMoveTag(ctx, el) {
+    const target = ctx.garment(ctx.state.sheet?.field);
+    const source = ctx.garment(el.dataset.id);
+    if (!target || !source) return;
+    if (!window.confirm(`Move tag from ${source.name} to ${target.name}?`)) return;
+    const res = await ctx.ws("garment/attach_tag", { garment_id: target.id, uid: el.dataset.uid, move: true });
+    if (res) { ctx.toast(`Tag moved to ${target.name}`); ctx.update({ sheet: null }); ctx.reload(); }
   },
   async linkTag(ctx, el) {
     const uid = ctx.state.sheet?.field;

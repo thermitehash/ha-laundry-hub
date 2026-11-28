@@ -78,12 +78,14 @@ A garment doesn't need an NFC tag. In **Add**, choose **No tag (wardrobe only)**
 details, AI description and fit as any other, with a small "No tag" badge and a
 **Tagged / No tag** filter in Closet.
 
+- **Wore it** is on every garment (tagged or not), with **Undo** for 10 seconds; the
+  garment shows how often and when it was last worn.
 - Their laundry state is set by hand from the garment: **To laundry** and **Clean / put
   away**. Laundry Hub never guesses where they are, never calls them missing, and leaves
   them out of the closet and bin counts.
 - **Attach tag** later: the next unknown tap at any station (or from the app) within
-  2 minutes links to that garment, or type the tag's ID. A tag that's already on another
-  garment offers **Move tag here**. **Replace tag** (lost tag) and **Remove tag** (back to
+  2 minutes links to that garment. **Move tag here** takes a tag from another garment: pick
+  it by name and photo, confirm once (typing a tag ID is under *Advanced*). **Replace tag** (lost tag) and **Remove tag** (back to
   untagged; history is kept) are on every tagged garment.
 - An unknown tag's notification and the Add page's *Seen recently* list also offer
   **Link to an untagged garment…**.

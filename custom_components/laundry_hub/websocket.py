@@ -694,6 +694,51 @@ async def ws_manual_state(
 
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): f"{DOMAIN}/garment/wear",
+        vol.Optional("if_rev"): _rev,
+        vol.Optional("if_revs"): _revs,
+        vol.Required("garment_id"): _str,
+    }
+)
+@websocket_api.async_response
+@_with_hub(Policy.OWN_GARMENT)
+async def ws_wear(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Wore it (any garment): a wear-log entry, and the garment is worn."""
+    garment = hub.resolve_garment(msg["garment_id"])
+    entry = hub.record_wear(garment)
+    return {"wear": entry, "garment": hub.garment_view(garment)}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/garment/wear_undo",
+        vol.Optional("if_rev"): _rev,
+        vol.Optional("if_revs"): _revs,
+        vol.Required("garment_id"): _str,
+        vol.Required("wear_id"): _str,
+    }
+)
+@websocket_api.async_response
+@_with_hub(Policy.OWN_GARMENT)
+async def ws_wear_undo(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Undo a manual wear (the toast's Undo)."""
+    garment = hub.resolve_garment(msg["garment_id"])
+    hub.undo_wear(garment, msg["wear_id"])
+    return hub.garment_view(garment)
+
+
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): f"{DOMAIN}/garment/attach_tag",
         vol.Optional("if_rev"): _rev,
         vol.Optional("if_revs"): _revs,
@@ -1366,7 +1411,7 @@ async def ws_hello(
 
 def capabilities(hub: LaundryHub) -> list[str]:
     """Features the app may show (more arrive in later versions)."""
-    caps = ["phone_tap", "changes", "if_rev", "untagged_garments"]
+    caps = ["phone_tap", "changes", "if_rev", "untagged_garments", "wear_log"]
     if app_access(hub) == ACCESS_HOUSEHOLD:
         caps.append("member_enroll")
     if hub.wardrobe.enabled:
@@ -1556,6 +1601,8 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_purchases_suggest,
         ws_hello,
         ws_manual_state,
+        ws_wear,
+        ws_wear_undo,
         ws_attach_tag,
         ws_attach_cancel,
         ws_remove_tag,

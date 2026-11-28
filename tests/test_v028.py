@@ -391,3 +391,115 @@ async def test_not_clothing_restore_keeps_photo_files_and_purge_removes_them(
     assert await inbox._async_purge_archived() == 1  # noqa: SLF001
     assert "lamp" not in inbox.cards and not (photos / "purchase-lamp-a.jpg").exists()
     assert "desk lamp" in inbox.meta["not_clothing"]["amazon"]  # the rule stays
+
+
+# --- wears ("Wore it") and the internal ranking ----------------------------------------
+
+
+async def test_wore_it_undo_and_the_wear_log_shape(
+    hass: HomeAssistant, hass_ws_client, freezer
+) -> None:
+    hub = await setup(hass)
+    bin_id, dry_id = zones(hub)
+    client = Client(await hass_ws_client(hass))
+    tagged = hub.enroll(
+        uid="11223344", name="Tagged tee", wash_bin=bin_id, dry_type=dry_id
+    )
+    shirt = hub.enroll(uid=None, name="Linen shirt", wash_bin=bin_id, dry_type=dry_id)
+    info = (await client("api_info"))["result"]
+    assert "wear_log" in info["capabilities"]
+    for garment in (tagged, shirt):
+        res = (await client("garment/wear", garment_id=garment.id))["result"]
+        wear = res["wear"]
+        assert set(wear) == {"id", "at", "source"} and wear["source"] == "manual"
+        view = res["garment"]
+        assert view["wear_count"] == 1 and view["last_worn"] == wear["at"]
+        assert view["worn_since"] == wear["at"]
+        assert view["state"] == garment.state  # the laundry state isn't touched
+    # Undo puts "worn" back as it was and drops the entry.
+    freezer.tick(timedelta(hours=1))
+    second = (await client("garment/wear", garment_id=shirt.id))["result"]["wear"]
+    undone = (
+        await client("garment/wear_undo", garment_id=shirt.id, wear_id=second["id"])
+    )["result"]
+    assert undone["wear_count"] == 1 and undone["worn_since"] == shirt.wear_log[0]["at"]
+    assert (await client("garment/wear_undo", garment_id=shirt.id, wear_id="nope"))[
+        "error"
+    ]["code"] == "unknown_wear"
+    # Any laundry change ends "worn": a station tap, or a manual action.
+    await hub.async_handle_tap("laundry", "11223344", "sort")
+    assert tagged.out_since is None and len(tagged.wear_log) == 1
+    res = (
+        await client("garment/manual_state", garment_id=shirt.id, action="to_laundry")
+    )["result"]
+    assert res["worn_since"] is None and res["wear_count"] == 1
+    # v0.3 station wears fit the same log; malformed entries are skipped.
+    hub.record_wear(tagged, source="station", station="closet_1")
+    tagged.wear_log.append("junk")
+    view = hub.garment_view(tagged)
+    assert view["wear_count"] == 2 and tagged.wear_log[1]["station"] == "closet_1"
+    assert (
+        await client(
+            "garment/wear_undo", garment_id=tagged.id, wear_id=tagged.wear_log[1]["id"]
+        )
+    )["error"]["code"] == "unknown_wear"
+
+
+async def test_internal_ranking_weighs_stale_untagged_states_down(
+    hass: HomeAssistant, freezer
+) -> None:
+    from custom_components.laundry_hub.hub import availability, rank_available  # noqa: PLC0415
+
+    hub = await setup(hass)
+    bin_id, dry_id = zones(hub)
+    closet = hub.enroll(
+        uid="11000001", name="A tagged closet", wash_bin=bin_id, dry_type=dry_id
+    )
+    await hub.async_handle_tap("closet_1", "11000001")
+    hub.enroll(uid="11000002", name="B tagged wash", wash_bin=bin_id, dry_type=dry_id)
+    await hub.async_handle_tap("laundry", "11000002", "sort")
+    stale = hub.enroll(
+        uid=None, name="C stale untagged", wash_bin=bin_id, dry_type=dry_id
+    )
+    hub.set_manual_state(stale, "to_laundry")
+    fresh = hub.enroll(
+        uid=None, name="D fresh untagged", wash_bin=bin_id, dry_type=dry_id
+    )
+    archived = hub.enroll(uid=None, name="E archived", wash_bin=bin_id, dry_type=dry_id)
+    archived.lifecycle = "donated"
+    freezer.tick(timedelta(days=40))
+    hub.set_manual_state(fresh, "put_away")
+    now = dt_util.utcnow()
+    ranked = rank_available(hub.catalog.garments.values(), now)
+    assert [g.name for g, _ in ranked] == [
+        "A tagged closet", "D fresh untagged", "C stale untagged", "B tagged wash",
+    ]  # fmt: skip
+    scores = {g.name: s for g, s in ranked}
+    assert scores["A tagged closet"] == 1.0 and scores["B tagged wash"] == 0.0
+    # A stale "in the wash" isn't believed: it fades towards 0.5 instead of 0.
+    assert scores["C stale untagged"] == 0.375
+    # Worn in the last 2 days: a little less likely; worn and not back: 0.3 base.
+    hub.record_wear(closet)
+    assert availability(closet, dt_util.utcnow()) == round(0.3 * 0.7, 3)
+
+
+async def test_members_wear_only_their_own(
+    hass: HomeAssistant, hass_ws_client, kid
+) -> None:
+    hub = await setup(hass, app_access="household")
+    hass.states.async_set(ALEX, "home", {"user_id": kid[0].id})
+    bin_id, dry_id = zones(hub)
+    mine = hub.enroll(
+        uid=None, name="Alex hat", wash_bin=bin_id, dry_type=dry_id, owner=ALEX
+    )
+    theirs = hub.enroll(
+        uid="55667788", name="Sam shirt", wash_bin=bin_id, dry_type=dry_id, owner=SAM
+    )
+    member = Client(await hass_ws_client(hass, kid[1]))
+    res = (await member("garment/wear", garment_id=mine.id))["result"]
+    assert (
+        await member("garment/wear_undo", garment_id=mine.id, wear_id=res["wear"]["id"])
+    )["success"]
+    assert (await member("garment/wear", garment_id=theirs.id))["error"][
+        "code"
+    ] == "unauthorized"

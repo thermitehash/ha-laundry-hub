@@ -19,6 +19,7 @@ function purchaseRow(ctx) {
        <div class="kv"><span>Stores</span><span>${p.stores}</span></div>
        <div class="kv"><span>Last check</span><span>${lib.esc(lib.timeAgo(p.last_check))}</span></div>
        <div class="kv"><span>New cards</span><span>${p.new_cards}</span></div>
+       <p class="hint" style="margin:0" data-section="purge-note">Archived cards and their photos are deleted 1 year after archiving.</p>
        ${p.cleanup?.skipped ? `<div class="row wrap" data-section="purchase-cleanup"><span class="state problem" style="flex:1">Cleanup skipped: AI unavailable — use Reclassify old cards</span>
          <button type="button" class="btn small" data-act="reclassify" ${ctx.state.busy?.reclassify ? "disabled" : ""}>${ctx.state.busy?.reclassify ? "Reclassifying…" : "Reclassify old cards"}</button></div>`
          : p.cleanup ? `<div class="row wrap" data-section="purchase-cleanup"><span style="flex:1">Cleaned up: ${p.cleanup.not_clothing} marked not clothing (restorable), ${p.cleanup.health} health items removed, ${p.cleanup.grouped} duplicates grouped</span>

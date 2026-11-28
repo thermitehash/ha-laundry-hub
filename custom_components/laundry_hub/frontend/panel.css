@@ -233,3 +233,4 @@ button.pcard:focus-visible, button.pcard[aria-pressed="true"] { border-color: va
 .tabbar .tab-badge { position: absolute; top: 4px; margin-left: 18px; }
 .tabbar button { position: relative; }
 .purchases-card .thumb span { font-weight: 600; color: var(--hub-text-muted); }
+.toast-action { margin-left: 12px; background: none; border: none; color: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; min-height: 32px; }

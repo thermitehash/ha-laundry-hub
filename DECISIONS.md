@@ -56,7 +56,38 @@ Choices made while building v0.2.8 without asking. Each line: decision, then rea
     - A top card "Purchases · N to review", with 3 thumbnails, appears whenever waiting cards exist (wardrobe on). It opens Closet → Purchases.
     - The Closet tab shows the same count as a badge. Inside Closet, the Purchases chip was already the first chip, with its count.
     - `?tab=closet&view=purchases` opens Purchases, and the panel writes `view=purchases` to the URL while it's open.
-21. **Wear tracking, outfit suggestions and the bedside "graveyard"** don't exist yet (v0.3). How far to go is asked as an open question. Untagged garments already carry everything those features will need: manual state, `state_updated` and `state_confidence`.
+21. **Heather's answers to the v0.2.8 questions:**
+    - Q1: foundation only.
+    - Q2: merge and tag when CI is green.
+    - Q3: keep the 1-year purge, shown in Settings; health items stay deleted at once.
+    - Q4: a tap never moves a tag; "Move tag here" opens a picker; typing stays as an advanced fallback.
+    - Q5: Heather edits the v0.2.6 release page herself.
+22. **"Wore it" is on every garment.**
+    - It appends `{id, at, source: "manual"}` to the garment's wear log and sets `out_since`, the field reserved for v0.3's "out". It's sent as `worn_since`.
+    - The laundry `state` is never changed, so stations and their logic are untouched.
+    - "Worn" ends when the laundry state next changes, by a station or phone tap or a manual To laundry / Clean.
+    - The log keeps the latest 1000 entries.
+23. **Wear-log shape for v0.3 without a migration:**
+    - Every entry has a ULID `id`, plus `at` and `source`. A station wear will add `station`.
+    - Readers skip entries without `at` and ignore unknown keys.
+    - `wear_count` counts valid entries, and `last_worn` is the latest `at`.
+    - Capability `wear_log` (the docs had reserved that name for v0.3), listed now since "Wore it" works.
+24. **Undo:**
+    - `garment/wear_undo` removes a *manual* entry by id. Station entries, when they come, aren't undoable this way.
+    - "Worn" goes back to what it was before that wear (kept in memory for the session); otherwise it's cleared if it came from that entry.
+    - The 10-second limit is the panel toast's; the server has none, which also lets v0.3 edit or delete wears later.
+25. **The ranking helper stays internal** (`availability()` and `rank_available()` in hub.py, tested, with no command and no UI):
+    - Base: put away 1, new 0.6, in the wash or drying 0. Worn and not back yet: 0.3.
+    - Blend: `trust × base + (1 − trust) × 0.5`, where trust is `state_confidence`. A stale untagged "in the wash" scores 0.375, not 0: its state carries less weight instead of being believed.
+    - Worn in the last 2 days: × 0.7. Archived garments are excluded.
+26. **"Move tag here"** opens a picker of the other tagged garments:
+    - each row shows the photo, owner and type; one row per tag when a garment has several;
+    - the panel then asks "Move tag from <garment> to <garment>?" and moves it with one call;
+    - it's on untagged and tagged garments (a second tag);
+    - typing an ID is under "Advanced: type a tag ID" in the waiting state;
+    - the tag_in_use answer to a typed ID still offers "Move tag here" for that tag.
+27. **Settings → Purchase emails says "Archived cards and their photos are deleted 1 year after archiving."** Health items are still deleted at once (cleanup and extraction).
+28. **The toast gained an optional action button** (`ctx.toast(text, error, {label, run})`), shown for 10 seconds. It's used for "Wore it" → Undo.
 
 # Decisions (v0.2.7)
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
@@ -21,6 +21,7 @@ from homeassistant.helpers import (
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
+from homeassistant.util.ulid import ulid_now
 
 from . import taxonomy
 from .access import Caller, Forbidden, can_see_garment
@@ -91,6 +92,52 @@ FRESH_FOR = timedelta(days=2)
 STALE_AFTER = timedelta(days=30)
 STALE_WEIGHT = 0.25
 UNKNOWN_WEIGHT = 0.5  # an untagged garment nobody has updated yet
+MAX_WEAR_LOG = 1000  # oldest wears are dropped beyond this
+# Availability for outfit ranking (v0.2.8 foundation; no UI until v0.3).
+AVAILABILITY = {STATE_PUT_AWAY: 1.0, "new": 0.6, STATE_IN_WASH: 0.0, STATE_DRYING: 0.0}
+WORN_AVAILABILITY = 0.3  # worn and not yet back in the laundry or closet
+NEUTRAL = 0.5  # what an untrusted state fades towards
+RECENTLY_WORN = timedelta(days=2)
+RECENTLY_WORN_FACTOR = 0.7
+
+
+def wear_entries(garment: Garment) -> list[dict[str, Any]]:
+    """The garment's wear log entries (anything malformed is skipped)."""
+    return [w for w in garment.wear_log if isinstance(w, dict) and w.get("at")]
+
+
+def last_worn(garment: Garment) -> str | None:
+    """ISO time of the latest wear, or None."""
+    times = [str(w["at"]) for w in wear_entries(garment)]
+    return max(times) if times else None
+
+
+def availability(garment: Garment, now: datetime) -> float:
+    """How likely the garment is ready to wear now (0..1). Internal; for v0.3.
+
+    The laundry state gives a base (put away 1, new 0.6, in the wash or
+    drying 0; worn and not back yet 0.3). An untrusted state (an untagged
+    garment updated long ago) fades towards a neutral 0.5 instead of being
+    believed, and anything worn in the last 2 days is a little less likely.
+    """
+    base = (
+        WORN_AVAILABILITY if garment.out_since else AVAILABILITY.get(garment.state, 0.5)
+    )
+    trust = state_confidence(garment, now)
+    score = trust * base + (1 - trust) * NEUTRAL
+    worn = last_worn(garment)
+    when = dt_util.parse_datetime(worn) if worn else None
+    if when is not None and now - when < RECENTLY_WORN:
+        score *= RECENTLY_WORN_FACTOR
+    return round(score, 3)
+
+
+def rank_available(
+    garments: Iterable[Garment], now: datetime
+) -> list[tuple[Garment, float]]:
+    """Active garments, most likely ready to wear first (internal, tested)."""
+    scored = [(g, availability(g, now)) for g in garments if g.lifecycle == "active"]
+    return sorted(scored, key=lambda item: (-item[1], item[0].name.lower()))
 
 
 def state_confidence(garment: Garment, now: datetime) -> float:
@@ -185,6 +232,7 @@ class LaundryHub:
         self._unsubs: list[Callable[[], None]] = []
         self._notified: dict[str, datetime] = {}
         self._link: LinkSession | None = None
+        self._wear_undo: dict[str, datetime | None] = {}
         self.zone_snapshot: dict[str, ConfigSubentry] = dict(entry.subentries)
         self.wardrobe = Wardrobe(self)
         self.purchases = PurchaseInbox(self)
@@ -420,6 +468,7 @@ class LaundryHub:
 
         garment.state = decision.new_state
         garment.location = decision.location
+        garment.out_since = None  # back in the laundry cycle: no longer "worn"
         garment.state_source = "tap"
         garment.state_updated = now
         garment.last_seen = now
@@ -626,6 +675,7 @@ class LaundryHub:
         now = dt_util.utcnow()
         garment.state = states[action]
         garment.location = None
+        garment.out_since = None
         garment.state_source = "manual"
         garment.state_updated = now
         self.catalog.record_garment_tap(
@@ -638,6 +688,49 @@ class LaundryHub:
                 "repeat": False,
             },
         )
+        self.catalog.schedule_save()
+        self.notify_changed()
+        return garment
+
+    def record_wear(
+        self,
+        garment: Garment,
+        *,
+        source: str = "manual",
+        station: str | None = None,
+        at: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Wore it: add a wear-log entry and mark the garment worn.
+
+        Entries are ``{id, at, source}`` (+ ``station`` for v0.3's station
+        wears). The id lets a wear be undone or edited without a migration.
+        Worn lasts until the garment's laundry state next changes.
+        """
+        when = at or dt_util.utcnow()
+        entry: dict[str, Any] = {
+            "id": ulid_now(),
+            "at": when.isoformat(),
+            "source": source,
+        }
+        if station:
+            entry["station"] = station
+        self._wear_undo[entry["id"]] = garment.out_since
+        garment.wear_log = [*garment.wear_log, entry][-MAX_WEAR_LOG:]
+        garment.out_since = when
+        self.catalog.schedule_save()
+        self.notify_changed()
+        return entry
+
+    def undo_wear(self, garment: Garment, wear_id: str) -> Garment:
+        """Remove a manual wear (the toast's Undo); "worn" goes back as it was."""
+        entry = next((w for w in wear_entries(garment) if w.get("id") == wear_id), None)
+        if entry is None or entry.get("source") != "manual":
+            raise validation_error("unknown_wear", "That wear isn't in the log")
+        garment.wear_log = [w for w in garment.wear_log if w is not entry]
+        if wear_id in self._wear_undo:
+            garment.out_since = self._wear_undo.pop(wear_id)
+        elif garment.out_since and garment.out_since.isoformat() == entry["at"]:
+            garment.out_since = None
         self.catalog.schedule_save()
         self.notify_changed()
         return garment
@@ -1242,6 +1335,12 @@ class LaundryHub:
             garment.state_updated.isoformat() if garment.state_updated else None
         )
         data["state_confidence"] = state_confidence(garment, now or dt_util.utcnow())
+        # v0.2.8: wears ("Wore it"; station wears come in v0.3).
+        data["wear_count"] = len(wear_entries(garment))
+        data["last_worn"] = last_worn(garment)
+        data["worn_since"] = (
+            garment.out_since.isoformat() if garment.out_since else None
+        )
         data.update(self.wardrobe.view(garment))
         return self.revs.stamp("garment", garment.id, data)
 

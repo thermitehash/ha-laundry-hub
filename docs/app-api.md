@@ -150,6 +150,35 @@ Commands:
 Members may attach a tag they just tapped with their phone (or one already on another of
 their own garments) to their own garments; anyone else's tag or garment → `unauthorized`.
 
+## Wears (0.2.8, capability `wear_log`)
+
+"Wore it" works on every garment, tagged or not. Garment fields (additive):
+
+- `wear_count`: how many wears are in the log; `last_worn`: ISO time of the latest, or
+  `null`.
+- `worn_since`: set by a wear, `null` again once the garment's laundry state next changes
+  (a tap, or a manual To laundry / Clean). A wear never changes `state` itself.
+
+The wear log is stored per garment as a list of entries. The shape is fixed so that later
+versions only add fields or sources, never migrate:
+
+```json
+{"id": "01JD…", "at": "2026-11-29T08:10:00+00:00", "source": "manual"}
+{"id": "01JD…", "at": "2026-11-29T08:10:00+00:00", "source": "station", "station": "closet_1"}
+```
+
+- `id`: a ULID, the handle for undo and (later) edits.
+- `at`: when it was worn (ISO 8601, UTC).
+- `source`: `manual` ("Wore it") now; `station` arrives in v0.3, with `station`.
+- Unknown keys must be ignored; entries without `at` are skipped by the server.
+
+Commands:
+
+- `garment/wear {garment_id}` (own) → `{wear, garment}`.
+- `garment/wear_undo {garment_id, wear_id}` (own) → the garment. Only `manual` entries;
+  anything else → `unknown_wear`. The panel offers Undo on its toast for 10 s; the server
+  itself has no time limit.
+
 ## Commands
 
 All types are prefixed with `laundry_hub/`. "Policy" is the access rule from the table above:
@@ -167,7 +196,7 @@ What the server supports and who you are.
 ```json
 {"api_version": 1, "api_versions_supported": [1], "min_client": 1,
  "integration_version": "0.2.8", "wardrobe_enabled": true,
- "capabilities": ["phone_tap", "changes", "if_rev", "untagged_garments", "member_enroll", "url_import", "ai_describe", "purchases", "purchase_groups", "purchase_assign"],
+ "capabilities": ["phone_tap", "changes", "if_rev", "untagged_garments", "wear_log", "member_enroll", "url_import", "ai_describe", "purchases", "purchase_groups", "purchase_assign"],
  "role": "member", "owner": "person.alex", "app_access": "household", "rev": 412}
 ```
 
@@ -178,7 +207,8 @@ What the server supports and who you are.
   listed with it.
 - `ai_describe` needs an AI Task entity.
 - `url_import` and `ai_describe` need Wardrobe on.
-- v0.3 will add `out_state` and `wear_log`. Show a feature only when its capability is listed.
+- `wear_log` (0.2.8): "Wore it" and the wear fields below. v0.3 will add station wears and
+  `out_state`. Show a feature only when its capability is listed.
 
 ### `hello {client_api_versions?, client_build?}` (read, 0.2.6)
 

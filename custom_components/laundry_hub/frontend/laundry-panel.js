@@ -186,7 +186,7 @@ class LaundryHubPanel extends HTMLElement {
       update: (patch) => { Object.assign(this.state, patch || {}); this.render(); },
       render: () => this.render(),
       reload: () => this._load(),
-      toast: (text, error) => this.toast(text, error),
+      toast: (text, error, action) => this.toast(text, error, action),
       go: (tab, extra = {}) => this.go(tab, extra),
       open: (id) => { this.state.garment = id; this.state.menu = false; this.state.editing = null; this.render(); },
       close: () => { this.state.garment = null; this.state.menu = false; this.state.editing = null; this.render(); },
@@ -246,11 +246,12 @@ class LaundryHubPanel extends HTMLElement {
     window.scrollTo?.(0, 0);
   }
 
-  toast(text, error = false) {
-    this.state.toast = { text, error };
+  // `action` adds a button to the toast ({label, run}), kept for 10 s (v0.2.8: Undo).
+  toast(text, error = false, action = null) {
+    this.state.toast = { text, error, action };
     this.render();
     clearTimeout(this._toastTimer);
-    this._toastTimer = setTimeout(() => { this.state.toast = null; this.render(); }, error ? 7000 : 3500);
+    this._toastTimer = setTimeout(() => { this.state.toast = null; this.render(); }, action ? 10000 : error ? 7000 : 3500);
   }
 
   // --- rendering ---------------------------------------------------------------
@@ -284,7 +285,7 @@ class LaundryHubPanel extends HTMLElement {
         <nav class="tabbar" aria-label="Sections">${tabs("tabbar")}</nav>
         ${this.state.garment && this.data ? this.mods.detail.render(ctx) : ""}
         ${this.state.sheet && this.data ? this.mods.closet.renderSheet(ctx) : ""}
-        ${this.state.toast ? `<div class="toast ${this.state.toast.error ? "error" : ""}" role="status">${lib.esc(this.state.toast.text)}</div>` : ""}
+        ${this.state.toast ? `<div class="toast ${this.state.toast.error ? "error" : ""}" role="status">${lib.esc(this.state.toast.text)}${this.state.toast.action ? ` <button type="button" class="toast-action" data-act="toastAction">${lib.esc(this.state.toast.action.label)}</button>` : ""}</div>` : ""}
         ${this.state.reconnecting ? `<div class="pill-status" role="status">Reconnecting…</div>` : ""}
       </div>`;
     if (keep) {
@@ -303,6 +304,13 @@ class LaundryHubPanel extends HTMLElement {
     const merged = {};
     for (const name of ["home", "closet", "add", "settings", "detail"]) Object.assign(merged, this.mods[name].actions || {});
     merged.tab = (ctx, el) => ctx.go(el.dataset.tab);
+    merged.toastAction = async () => {
+      const action = this.state.toast?.action;
+      clearTimeout(this._toastTimer);
+      this.state.toast = null;
+      this.render();
+      if (action) await action.run();
+    };
     merged.retryLoad = () => { this.state.loadError = null; this._loadBackoff = 1000; this.render(); this._load(); };
     merged.toastClose = (ctx) => ctx.update({ toast: null });
     return merged;
