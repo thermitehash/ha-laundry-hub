@@ -1,3 +1,36 @@
+# Laundry Hub build report: v0.2.2
+- Version: 0.2.2 / Date: 2026-11-28 / Repo: https://github.com/thermitehash/ha-laundry-hub
+- PR: https://github.com/thermitehash/ha-laundry-hub/pull/5 (not merged). v0.2.1 was merged in PR #4 (`0aa9994`) and released as `v0.2.1`.
+- Commit: `81bcf9e` (code); this report is committed on top as a docs-only commit
+- CI: workflow **Validate**, run 46089072250 on `81bcf9e`: all 16 ✅ (new: `ha-internals`)
+  - Version consistency ✅ · Version bump ✅ (0.2.2 > 0.2.1) · lint ✅ · tests ubuntu/macOS ✅ · mutation ✅ · panel ✅
+  - firmware-host-tests ×2 ✅ · esphome compile ×4 ✅ · hassfest ✅ · hacs ✅
+  - ha-internals ✅: HA 2026.11.3 ✅ and dev branch ✅. The private attribute behind the hidden media source exists in both.
+
+## Summary
+Purchase inbox polish: partial shipments, an Archived view with Restore, Heather's stores (Narvar subdomains only), Shopify stores by name, uniform suppliers (Blauer, First Tactical) with a preset and a bulk offer, and a Settings status row.
+
+## What shipped
+- **Partial shipments:** a shipping email for a known order adds cards for clothing items (or items with no apparel flag) not yet on a card. Existing cards are still only updated.
+- **Archived + Restore:** dismissed and archived cards are shown newest first. Restore re-fetches the photo once through the pinned pipeline from the stored `image_url` and lifts a Not-clothing rule. Auto-archive counts from the last status change.
+- **Catalog:** Heather's 21 stores, with Narvar per-brand subdomains. `narvar.com`, `narvarnotify.com` and `shopifyemail.com` are refused as custom domains and ignored if stored. The supplier list from the original prompt was dropped (follow-up). Life is Best Outside is left out because apparel couldn't be confirmed.
+- **Shopify by name:** First Tactical is built in, and user-added names are supported. A name matches as whole words in the From display name or the Subject.
+  - Gmail is searched with `from:shopifyemail.com ("Name" …)`; generic IMAP with `FROM shopifyemail.com`, then a local header check.
+  - Step B counts read headers only, never bodies.
+- **Uniform suppliers (Blauer, First Tactical):** matching a card presets uniform and wear_for=work. A once-per-store "Mark all matched garments from <Store> as uniform" offer has accept and decline.
+- **Settings:** a read-only Purchase emails row.
+- **CI:** `ha-internals` job and `script/check_ha_internals.py`.
+
+## Tests
+- 300 pytest (coverage 96 %), green on ubuntu and macOS. New suite `tests/test_purchases_v022.py` (15) and new email fixtures.
+- Panel smoke test extended: Archived view and Restore, uniform offer, Settings row.
+
+## Needs a person
+- A real mailbox: Lands' End and Columbia Narvar emails, a First Tactical Shopify email, and a Blauer order.
+- Restore on a real dismissed card (photo re-fetch).
+
+---
+
 # Laundry Hub build report: v0.2.1
 - Version: 0.2.1 / Date: 2026-11-27 / Repo: https://github.com/thermitehash/ha-laundry-hub
 - PR: https://github.com/thermitehash/ha-laundry-hub/pull/4 (not merged)
