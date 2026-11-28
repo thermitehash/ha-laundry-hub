@@ -99,6 +99,14 @@ def _purchases(hub: Any) -> dict[str, Any]:
         "not_clothing_rules": sum(
             len(v) for v in (meta.get("not_clothing") or {}).values()
         ),
+        "unreadable_emails": len(meta.get("unreadable") or {}),
+        "unreadable_senders": sorted(
+            {
+                str(e.get("sender_domain"))
+                for e in (meta.get("unreadable") or {}).values()
+            }
+        ),
+        "pending_failures": len(meta.get("failures") or {}),
         "last_check": meta.get("last_check"),
         "last_error": meta.get("last_error"),
     }

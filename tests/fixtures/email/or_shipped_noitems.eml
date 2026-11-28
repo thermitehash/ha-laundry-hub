@@ -1,0 +1,25 @@
+From: Outdoor Research <outdoorresearch@outdoorresearch.narvar.com>
+To: shopper@example.com
+Subject: Your order has shipped
+Date: Sun, 15 Nov 2026 15:00:00 +0000
+Message-ID: <or-ship@narvar.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============6487303772493046218=="
+
+--===============6487303772493046218==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Plain text version.
+
+--===============6487303772493046218==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Good news! Your Outdoor Research order is on its way.</p><p><a=
+ href=3D"https://outdoorresearch.narvar.com/tracking/x">Track package</a></p>=
+</body></html>
+
+--===============6487303772493046218==--

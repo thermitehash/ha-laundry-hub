@@ -251,6 +251,31 @@ async def test_placeholder_scan_covers_every_step(
             await hass.config_entries.options.async_configure(
                 flow["flow_id"], {"next_step_id": "email_check"}
             )
+        # Retry unreadable emails (menu option + retry_done abort).
+        entry.runtime_data.purchases.meta["unreadable"] = {
+            "<x@y>": {
+                "message_id": "<x@y>",
+                "store": "Outdoor Research",
+                "date": "2026-11-20T10:00:00+00:00",
+                "sender_domain": "outdoorresearch.narvar.com",
+                "error": "HomeAssistantError",
+                "uid": 1,
+                "folder": "imap.gmail.com:993/[Gmail]/All Mail",
+            }
+        }
+        flow = await hass.config_entries.options.async_init(entry.entry_id)
+        assert "email_retry" in flow["menu_options"]
+        assert (
+            "1 email couldn't be read (Outdoor Research, Nov 20)"
+            in (flow["description_placeholders"]["status"])
+        )
+        with patch(
+            "custom_components.laundry_hub.purchases.PurchaseInbox.async_check",
+            AsyncMock(return_value={"new_cards": 0, "updated_cards": 0}),
+        ):
+            await hass.config_entries.options.async_configure(
+                flow["flow_id"], {"next_step_id": "email_retry"}
+            )
         server.password = "wrong"
         entry.runtime_data.purchases._next_allowed = None  # noqa: SLF001
         flow = await hass.config_entries.options.async_init(entry.entry_id)

@@ -280,6 +280,9 @@ Changes made under v0.2 are not in the backup.
   tap from a device other than the configured one is logged and dropped.
 - **Purchase emails: "Google rejected the password"**: use an app password, not your normal
   password, and check that 2-Step Verification is on.
+- **Purchase emails: "1 email couldn't be read"**: one order email failed three times and was
+  set aside so the rest keep importing. Use **Retry unreadable emails** (Settings in the panel,
+  or Configure); the HA log line "An order email from … couldn't be read" says why.
 - **Purchase emails: no cards**: check that the store is ticked in *Edit stores* and that
   its emails come from a domain in the list (add it under *Custom sender domains* if not).
   *Check now* shows the counts.

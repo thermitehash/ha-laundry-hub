@@ -51,7 +51,8 @@
           "email_stores": "Purchase emails: edit stores",
           "email_options": "Purchase emails: check interval and cleanup",
           "email_check": "Purchase emails: check now",
-          "email_disconnect": "Purchase emails: disconnect"
+          "email_disconnect": "Purchase emails: disconnect",
+          "email_retry": "Purchase emails: retry emails that couldn't be read"
         },
         "menu_option_descriptions": {
           "email_account": "Connect an email account, or change its app password."
@@ -166,7 +167,8 @@
     "abort": {
       "not_loaded": "Laundry Hub isn't loaded.",
       "check_done": "Checked purchase emails: {new} new cards, {updated} updated.",
-      "check_failed": "Couldn't check purchase emails: {error}"
+      "check_failed": "Couldn't check purchase emails: {error}",
+      "retry_done": "Read {retried} email(s) again: {new} new cards. {still} still couldn't be read."
     }
   },
   "config_subentries": {

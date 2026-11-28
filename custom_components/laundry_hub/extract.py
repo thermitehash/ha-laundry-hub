@@ -100,22 +100,27 @@ def plain_to_text(plain: str, limit: int = MAX_TEXT) -> str:
     return "\n".join(line for line in lines if line)[:limit]
 
 
+def _text_field() -> dict[str, Any]:
+    return {"selector": {"text": {}}}
+
+
 def structure() -> probatio.Schema:
-    """Schema for ai_task.generate_data (provider validates the shape)."""
+    """Schema for ai_task.generate_data: loose on purpose.
+
+    Every field is optional and plain text (prices like "$12.99", quantities
+    like "2"), items may be empty, and nothing is required, so a provider
+    never fails on shape. Everything is parsed and validated locally.
+    """
     text = selector.selector({"text": {}})
-    number = selector.selector({"number": {"min": 0, "step": 0.01, "mode": "box"}})
     boolean = selector.selector({"boolean": {}})
     item_fields = {
-        "name": {"selector": {"text": {}}, "required": True},
-        "brand": {"selector": {"text": {}}},
-        "color": {"selector": {"text": {}}},
-        "size": {"selector": {"text": {}}},
-        "quantity": {"selector": {"number": {"min": 0, "step": 1, "mode": "box"}}},
-        "unit_price": {"selector": {"number": {"min": 0, "step": 0.01, "mode": "box"}}},
-        "product_url": {"selector": {"text": {}}},
-        "image_url": {"selector": {"text": {}}},
-        "is_apparel": {"selector": {"boolean": {}}},
-    }
+        key: _text_field()
+        for key in (
+            "name", "brand", "color", "size", "quantity", "unit_price",
+            "product_url", "image_url",
+        )
+    }  # fmt: skip
+    item_fields["is_apparel"] = {"selector": {"boolean": {}}}
     items = selector.selector({"object": {"fields": item_fields, "multiple": True}})
     descriptions = {
         "is_order": "True if this email confirms, ships or delivers a purchase.",
@@ -123,8 +128,10 @@ def structure() -> probatio.Schema:
         "order_date": "Order date as YYYY-MM-DD.",
         "currency": "ISO 4217 code, e.g. USD.",
         "items": (
-            "One entry per product. product_url and image_url must be copied "
-            "exactly from a [link: ...] or [image: ...] marker, or left out."
+            "One entry per product; empty if the email lists none (for example a "
+            'shipping notice). Prices may be written as in the email ("$12.99"). '
+            "product_url and image_url must be copied exactly from a [link: ...] "
+            "or [image: ...] marker, or left out."
         ),
     }
     fields: dict[str, Any] = {
@@ -133,13 +140,34 @@ def structure() -> probatio.Schema:
         "order_ref": text,
         "order_date": text,
         "currency": text,
-        "total": number,
+        "total": text,
         "items": items,
     }
     return probatio.Schema(
         {
             probatio.Optional(key, description=descriptions.get(key)): value
             for key, value in fields.items()
+        },
+        extra=probatio.REMOVE_EXTRA,
+    )
+
+
+def minimal_structure() -> probatio.Schema:
+    """Fallback after a failed call: only what a card needs."""
+    items = selector.selector(
+        {
+            "object": {
+                "fields": {"name": _text_field(), "image_url": _text_field()},
+                "multiple": True,
+            }
+        }
+    )
+    return probatio.Schema(
+        {
+            probatio.Optional("is_order"): selector.selector({"boolean": {}}),
+            probatio.Optional("store"): selector.selector({"text": {}}),
+            probatio.Optional("order_ref"): selector.selector({"text": {}}),
+            probatio.Optional("items"): items,
         },
         extra=probatio.REMOVE_EXTRA,
     )
@@ -199,13 +227,20 @@ def _clean(value: Any, limit: int) -> str | None:
     return text[:limit] or None
 
 
+_AMOUNT = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+
 def _number(value: Any) -> float | None:
-    if isinstance(value, bool):
+    """12.99, "12.99", "$12.99", "USD 1,234.50", "2 pcs" → number; else None."""
+    if value is None or isinstance(value, bool):
         return None
-    try:
-        number = float(str(value).replace(",", "").replace("$", "").strip())
-    except (TypeError, ValueError):
-        return None
+    if isinstance(value, int | float):
+        number = float(value)
+    else:
+        match = _AMOUNT.search(str(value))
+        if match is None:
+            return None
+        number = float(match.group(0).replace(",", ""))
     return round(number, 2) if 0 <= number < 1_000_000 else None
 
 
@@ -234,7 +269,7 @@ def validate(raw: Any, sent_text: str, *, clothing_only: bool) -> Order:
     if not isinstance(raw, dict):
         raise TypeError("AI result is not an object")
     order = Order(
-        is_order=bool(raw.get("is_order", True)),
+        is_order=raw.get("is_order") is not False,
         order_ref=_clean(raw.get("order_ref"), 60),
         order_date=_date(raw.get("order_date")),
         currency=(_clean(raw.get("currency"), 3) or "").upper() or None,
@@ -262,7 +297,7 @@ def validate(raw: Any, sent_text: str, *, clothing_only: bool) -> Order:
             )
             if given and not kept
         )
-        quantity = _number(entry.get("quantity"))
+        quantity = _number(entry.get("quantity"))  # "2", 2, None → 1 if missing
         order.items.append(
             Item(
                 name=name,
@@ -297,11 +332,27 @@ async def extract(
     clothing_only: bool,
 ) -> Order:
     """Ask AI Task for the order details and validate them."""
-    result = await _generate_data(
-        hass,
-        task_name=TASK_NAME,
-        entity_id=entity_id,
-        instructions=instructions(store_name, text),
-        structure=structure(),
-    )
-    return validate(result.data, text, clothing_only=clothing_only)
+    prompt = instructions(store_name, text)
+    try:
+        result = await _generate_data(
+            hass,
+            task_name=TASK_NAME,
+            entity_id=entity_id,
+            instructions=prompt,
+            structure=structure(),
+        )
+        return validate(result.data, text, clothing_only=clothing_only)
+    except Exception as err:
+        first = err
+    # Once more with the smallest structure that still makes a card.
+    try:
+        result = await _generate_data(
+            hass,
+            task_name=TASK_NAME,
+            entity_id=entity_id,
+            instructions=prompt,
+            structure=minimal_structure(),
+        )
+        return validate(result.data, text, clothing_only=clothing_only)
+    except Exception as err:
+        raise err from first

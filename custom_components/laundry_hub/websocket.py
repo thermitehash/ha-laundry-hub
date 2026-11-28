@@ -377,6 +377,22 @@ async def ws_purchases_uniform(
     return {"updated": count}
 
 
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/purchases/retry_unreadable"}
+)
+@websocket_api.async_response
+@_with_hub(Policy.ADMIN)
+async def ws_purchases_retry(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Clear the 'couldn't be read' marks and read those emails again."""
+    hub.wardrobe.require()
+    return await hub.purchases.async_retry_unreadable()
+
+
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/purchases/check"})
 @websocket_api.async_response
 @_with_hub(Policy.ADMIN)
@@ -1196,6 +1212,7 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_purchases_match,
         ws_purchases_dismiss,
         ws_purchases_check,
+        ws_purchases_retry,
         ws_purchases_restore,
         ws_purchases_uniform,
         ws_api_info,

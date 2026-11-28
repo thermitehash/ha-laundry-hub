@@ -1,0 +1,24 @@
+From: Outdoor Research <orders@outdoorresearch.com>
+To: shopper@example.com
+Subject: Your Outdoor Research order OR-5600
+Date: Fri, 20 Nov 2026 15:00:00 +0000
+Message-ID: <or-order-2@outdoorresearch.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============0987702737492469340=="
+
+--===============0987702737492469340==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Plain text version.
+
+--===============0987702737492469340==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Order OR-5600</p><p>Echo T-Shirt, Black, L USD 45</p></body></=
+html>
+
+--===============0987702737492469340==--

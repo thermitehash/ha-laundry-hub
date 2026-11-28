@@ -199,6 +199,13 @@ The signature is the auth, so the URL works in an image view without headers.
 
 Errors: `unknown_photo`, and `unauthorized` for someone else's garment.
 
+### Purchase import status (admins)
+
+`data.purchases` includes `unreadable`: emails that couldn't be read after 3 attempts, as
+`[{store, date, sender_domain, error}]`, newest first. They are skipped so the rest of the import
+continues. `purchases/retry_unreadable` (admin) clears the marks, reads them again and answers
+with the check summary plus `retried`.
+
 ### Existing commands
 
 Unchanged from v0.2.2; they gain only `if_rev` / `if_revs` and the policies.
@@ -213,7 +220,7 @@ Unchanged from v0.2.2; they gain only `if_rev` / `if_revs` and the policies.
   - `garment/describe_fields`, `garment/reset_field` (admin-only from 0.2.4)
   - `reassign`, `zone/remove`, `zone/flash`, `unknown/dismiss`
   - `import_product_url`, `import/apply`, `owner/update`
-  - `purchases/*`
+  - `purchases/*` (including `purchases/retry_unreadable`, 0.2.4)
 
 ## HTTP
 

@@ -305,6 +305,7 @@ def payloads(hub: LaundryHub, gid: str) -> dict[str, dict[str, Any]]:
         "purchases/restore": {"card_id": "c"},
         "purchases/uniform": {"store_key": "blauer"},
         "purchases/check": {},
+        "purchases/retry_unreadable": {},
     }
 
 
