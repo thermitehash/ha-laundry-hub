@@ -1,3 +1,31 @@
+# Laundry Hub build report: v0.2.3
+- Version: 0.2.3 / Date: 2026-11-28 / Repo: https://github.com/thermitehash/ha-laundry-hub
+- PR: https://github.com/thermitehash/ha-laundry-hub/pull/6 (not merged). v0.2.2 was merged in PR #5 (`543d302`) and released as `v0.2.2`.
+- Commit: `2f89402` (code); this report is committed on top as a docs-only commit
+- CI: workflow **Validate**, run 46097893780 on `2f89402`: all 16 ✅ (version consistency, version bump, lint, tests ubuntu/macOS, mutation, panel, firmware ×2, ESPHome ×4, hassfest, HACS, ha-internals)
+
+## Summary
+The app API for a native iOS client:
+- `api_info`;
+- offline sync (revs, tombstones, `changes`);
+- optimistic writes (`if_rev`);
+- non-admin household access with a people mapping and one permission helper;
+- phone taps through the station state machine;
+- `photo/url`.
+
+It is purely additive: the panel and every v0.2.2 command, service, event and entity are unchanged. The contract is in `docs/app-api.md`.
+
+## Tests
+- 319 pytest (coverage 96 %). New `tests/test_app_api.py` (19), including the permission matrix for every command (admin and member, household off and on).
+- The v0.2.2 suite is unchanged except one assertion (`subscribe` events now carry `rev`). The panel smoke test passes.
+
+## Needs a person
+- A non-admin HA user with Household access (iOS app or websocket): sees and taps only their own garments.
+- A phone tap through the real iOS app (NFC) once it exists.
+- Offline sync and a conflict between the panel and the app.
+
+---
+
 # Laundry Hub build report: v0.2.2
 - Version: 0.2.2 / Date: 2026-11-28 / Repo: https://github.com/thermitehash/ha-laundry-hub
 - PR: https://github.com/thermitehash/ha-laundry-hub/pull/5 (not merged). v0.2.1 was merged in PR #4 (`0aa9994`) and released as `v0.2.1`.
