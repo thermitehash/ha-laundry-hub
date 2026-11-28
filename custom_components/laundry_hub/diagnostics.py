@@ -107,6 +107,16 @@ def _purchases(hub: Any) -> dict[str, Any]:
             }
         ),
         "pending_failures": len(meta.get("failures") or {}),
+        # v0.2.6: counts only (no names, owners or order numbers).
+        "cleanup": {
+            k: (meta.get("cleanup") or {}).get(k)
+            for k in ("version", "removed", "grouped", "split", "classified")
+        },
+        "grouped_cards": sum(
+            1 for c in inbox.cards.values() if len(c.get("history") or []) > 1
+        ),
+        "assigned_cards": sum(1 for c in inbox.cards.values() if c.get("owner")),
+        "learned_shop_ids": len(meta.get("shop_ids") or {}),
         "last_check": meta.get("last_check"),
         "last_error": meta.get("last_error"),
     }

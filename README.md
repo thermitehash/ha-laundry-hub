@@ -67,13 +67,13 @@ First setup seeds **Darks, Lights & whites, Colors, Reds, Delicates** and **Drye
 Lay flat**.
 
 Deleting a bin or dry type that garments still use is blocked, with an error that names the
-number of garments. Move them first with **Laundry panel → Garments → Bulk reassign**.
+number of garments. Move them first with **Laundry Hub panel → Garments → Bulk reassign**.
 If an in-use entry is deleted through the generic subentry menu (which cannot be blocked),
 Laundry Hub restores it immediately and raises a repair issue that explains what to do.
 
-## Laundry panel
+## Laundry Hub panel
 
-The **Laundry** sidebar panel is admin-only and built for phones first: a bottom tab bar on
+The **Laundry Hub** sidebar panel (at `/laundry`) is admin-only and built for phones first: a bottom tab bar on
 phones, a top bar on wide screens. It follows Home Assistant's light and dark mode, and taps,
 moves and new garments appear without a refresh.
 
@@ -135,12 +135,16 @@ product link, photo) that you can match to garments. Needs Wardrobe on and an AI
    H&M, Zara, Uniqlo, Lululemon, Nike and more, plus Lands' End, American Tall, L.L.Bean,
    Duluth Trading, Eddie Bauer, Outdoor Research, Backcountry, Columbia, Carhartt,
    Coldwater Creek, Brooks Brothers, Orvis, Darn Tough, Woolx, Outway, MeUndies,
-   Underoutfit, Truekind, Cinderella Shoes, Blauer and First Tactical.
+   Underoutfit, Truekind, Cinderella Shoes, Amalli Talli, Blauer and First Tactical.
    - **Narvar** shipping emails are matched only on each brand's own subdomain (for example
      `landsend.narvar.com`); `narvar.com` itself is never matched and can't be added.
    - **Shopify stores by name:** shops on Shopify all send from `shopifyemail.com`, so add
      them by name (comma-separated). An email counts only if the name appears as whole words
-     in the sender's name or the subject. First Tactical is built in.
+     in the sender's name or the subject, or (once learned from the first match) it comes
+     from that shop's own `store+<id>@` address. Another shop using the same name is
+     refused. First Tactical and Amalli Talli are built in.
+   - **Pharmacy** emails (Amazon Pharmacy) are never read, and medication or health items
+     in any order are never stored.
 3. **Options:** check every N minutes (default 30, at least 15), how far back the first check
    looks (none, 30, **90** or 365 days), clothing only (default on: an Amazon order for
    batteries is skipped), and archive unmatched cards after N days (default 60).
@@ -154,8 +158,20 @@ deletes the stored address and password and asks whether to keep or delete exist
   row of cards. Tapping one fills in the name, brand, size, purchase details and photo (the
   photo is copied, so dismissing the card later never deletes it). *None of these* carries
   on as normal. Nothing is ever matched automatically.
-- **Closet → Purchases:** each card offers *Match to garment* (search for the garment),
-  *Dismiss*, and *Not clothing* (dismisses it and remembers that product for that store).
+- **Closet → Purchases:** one card per item. Emails about the same order (confirmation,
+  shipping, delivery) never add up; buying the same item again adds to the card's quantity
+  ("×2") with its own line in the card's purchase history. Each card offers *Match to
+  garment* (one garment for all units, or one unit per garment), a quantity stepper (a
+  quantity you set stays put until you choose *Use the emails' count*), *Split* (pull a
+  purchase out into its own card), *Merge…*, *Assign to…*, *Dismiss*, and *Not clothing*
+  (dismisses it and remembers that product for that store).
+- **Assigning cards:** give a card to a household member from its *Assign to…* button, or
+  select several and use *Assign to…* at the bottom. Filter the inbox by All, Unassigned or
+  person. After you assign two similar items (the same size line such as "Kids", or the same
+  product line) to one person, new similar cards show *Suggested: <name>*; nothing is
+  assigned without a tap. With App access set to Household, members see (in the app) only
+  the cards assigned to them, and can match them to their own garments, dismiss them or mark
+  them Not clothing.
 - **Garment detail:** a matched garment shows "From your Old Navy order, Nov 22" with a link
   to the product.
 - Shipping and delivery emails for an order you already have update its card. If one lists a
@@ -166,7 +182,9 @@ deletes the stored address and password and asks whether to keep or delete exist
   *Uniform* ticked (you can untick it). Purchases offers once per store to mark garments you
   already matched from them as uniform.
 - **Settings** shows a read-only *Purchase emails* row (connected, stores, last check, new
-  cards, last problem) with a link to Configure.
+  cards, last problem) with a link to Configure. After updating to 0.2.6 it shows once
+  "Cleaned up: X non-clothing removed, Y duplicates grouped" for cards made by older
+  versions.
 
 > **Privacy:** Laundry Hub only reads mail, and only from the stores you opt in to. It opens
 > the folder read-only and never sends, deletes, moves or flags messages. It reads the

@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "laundry_hub"
 NAME: Final = "Laundry Hub"
-VERSION: Final = "0.2.5"
+VERSION: Final = "0.2.6"
 
 # Event fired by the tap stations (ESPHome `homeassistant.event`).
 TAP_EVENT: Final = "esphome.laundry_tap"
@@ -40,6 +40,11 @@ CONF_FOLLOW_HA_THEME: Final = "follow_ha_theme"
 CONF_APP_ACCESS: Final = "app_access"  # "admins" (default) or "household"
 CONF_USER_OWNERS: Final = "user_owners"  # {ha_user_id: person entity id or ""}
 API_VERSION: Final = 1  # adding fields never bumps it; removing/renaming does
+# Every API version this server can serve (v0.2.6); API_VERSION is the preferred one.
+API_VERSIONS_SUPPORTED: Final = (1,)
+# The lowest app build the server accepts. Raise it only when a server change
+# would break older builds (v0.2.6).
+MIN_CLIENT: Final = 1
 
 CONF_PURCHASE_EMAIL: Final = "purchase_email"
 CONF_PURCHASE_STORES: Final = "purchase_stores"
@@ -138,7 +143,7 @@ DESCRIBE_MAX_ATTACHMENTS: Final = 3
 
 # Panel.
 PANEL_URL: Final = "laundry"
-PANEL_TITLE: Final = "Laundry"
+PANEL_TITLE: Final = "Laundry Hub"  # sidebar; the URL stays /laundry
 PANEL_ICON: Final = "mdi:washing-machine"
 PANEL_COMPONENT: Final = "laundry-hub-panel"
 PANEL_STATIC_URL: Final = "/laundry_hub_static"

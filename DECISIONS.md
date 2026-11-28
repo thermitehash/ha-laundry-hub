@@ -1,3 +1,69 @@
+# Decisions (v0.2.6)
+
+Choices made while building v0.2.6 without asking. Each line: decision, then reason.
+
+1. **A card is a group:** it keeps `history` (one line per purchase: order_ref, order_date, store, unit_price, currency, quantity, plus internal email kinds and Message-IDs that are never sent to clients), `quantity`, `quantity_locked`, `matches` (`[{garment_id, units}]`), `dismissed_units` and `owner`. Older cards get a one-line history on first use, so no store migration is needed. `order_ref`, `order_date` and `unit_price` at the top stay, showing the latest purchase, so older clients keep working.
+2. **Same purchase vs new purchase** (`grouping.py`, pure functions):
+   - The same normalized order_ref is the same units, whatever the email kind.
+   - Different refs are a new purchase.
+   - With a ref missing on either side, it's the same units only within 14 days, with agreeing colour, size, cut and price wherever both have one, and not a confirmation that comes after another confirmation (or after a later email about that item).
+   - A new purchase of an item that already has an unmatched card joins it (quantity added, its own history line). Otherwise it's a new card.
+3. **Email kind comes from the subject** (delivery, shipping, confirmation, other). The body isn't kept, so the subject is the only clue left. The confirmation's quantity wins. Without a confirmation, the largest quantity seen is used, so a partial shipment never lowers it.
+4. **Ref normalization:** upper case, without spaces, "-" and "#". Refs are compared as written *and* without a 1-2 digit shipment suffix, but only when at least 5 characters remain, so "8176491-1" equals "8176491" while "113-1" and "113-2" stay different. A leading-letter prefix is ignored when at least 4 characters remain ("Z1751170" = "1751170", "WEB35683056" = "35683056"). Refs are only compared within one store.
+5. **Item identity = same store + `item_key`:** the name without a " - A / B / C" suffix and without words already in the colour, size or cut fields, lower case, no punctuation. Size differences don't split a group (the RUMIA dress in L and XL is one card ×2, which covers a size exchange). Split handles a wrong grouping.
+6. **Matched cards:** an email about units already matched still finds that card, so it never creates a duplicate, and only fills empty fields. A *new* purchase never joins a matched card; it starts a new one. "Grouping never touches matched ones."
+7. **Matching up to N:** `purchases/match` takes `units` (1..remaining, default all remaining), so an older client's single match still uses the whole card as before. The same garment matched twice adds units to one match line. The card stays `new` until remaining is 0, then becomes `matched`. The garment gets the card's latest purchase details.
+8. **Dismiss on a partly matched group** dismisses the remaining units and the card becomes `matched` (its other units live on with their garments). Photos are deleted once no units remain, as dismiss always did; garments keep their copies.
+9. **A new purchase of a dismissed or archived item** reopens the card as `new`. The old units stay dismissed, and the new ones wait to be matched. Before v0.2.6, a new order made a new visible card too.
+10. **Quantity lock:** `set_quantity` locks; `null` unlocks and recounts from the history. It can't go below the matched units (`quantity_too_low`). A locked card's later emails add history only.
+11. **Split** needs at least two purchases and refuses to leave fewer units than are matched. The new card copies the item fields and owner, gets copies of the photos (new files), and starts unmatched.
+12. **Merge** keeps the fuller card (more filled fields; photos count double), appends the other's history, sums units (dismissed units carry over), keeps the first owner, and deletes the other card (a tombstone in `changes`). Matched cards can't be merged.
+13. **The one-time cleanup** (store meta `cleanup.version = 1`) runs at the start of the first check after the update, or 2 minutes after startup, whichever is first. Steps:
+    - Re-classify every new and dismissed card with step-2 request (a), by name only, since email bodies aren't kept.
+    - Delete health items always. With clothing-only on, also delete non-apparel cards and their photos outright.
+    - A card the AI didn't answer for is kept: deletion fails closed. If the AI is unavailable, nothing is removed and that's logged once.
+    - Then group duplicates. A same-ref or same-purchase pair keeps the earlier card's quantity, and a dismissed copy of the same units doesn't count as dismissed. A different order adds a history line.
+    - Then split name suffixes.
+    - Counts are logged, never names. The Settings line shows until the admin taps OK (`purchases/cleanup_seen`).
+14. **Health and medication items are dropped whatever "Clothing only" says** ("default-exclude"), via a new `is_health` field in step-2 request (a). Amazon Pharmacy mail is rejected at the header check, before any body fetch:
+    - the `pharmacy@amazon.com` local part (or any local part starting "pharmacy");
+    - `pharmacy.amazon.com` and its subdomains;
+    - the display name "Amazon Pharmacy".
+15. **Budget:** step-2 request (a) is now name, is_apparel, is_health, quantity, unit_price, line_total (7 fields). Request (b) adds brand (7 fields). The full item request is exactly at the 12-field budget. The cleanup reuses request (a) with its own prompt (names only), so no new structure was added. Every structure is still checked by `tests/test_ai_schema.py`.
+16. **unit_price from a line total** only when no unit price is given: total ÷ quantity, rounded to cents.
+17. **Cut mapping:** tall, petite, plus and maternity → `size.cut`. Otherwise the cut's words are matched to a fit option (slim, regular, relaxed…). Anything else isn't copied. The fit is set only when it isn't user-set and is empty or came from an import. A user-set brand or size is never overwritten (unchanged rule).
+18. **Shopify:**
+    - A shop id comes from the plus-address (`store+<digits>@`). A known id wins. A name match is refused when that shop's id is known and differs.
+    - Ids are learned on the first match of any Shopify entry without one (user-added names, and First Tactical), and stored in the inbox meta.
+    - Gmail search adds `from:store+<id>@` for known ids.
+    - A Shopify store's own domain (amallitalli.com) is searched and matched directly.
+    - Another shop is still rejected at the header check and never body-fetched.
+19. **Assignment:** an owner is a `person` entity, or `null` for unassigned (validated like garment owners).
+    - Members see cards assigned to their owner, plus cards already matched to their own garments, in `data`, `changes` (others come back as tombstones) and the photo views.
+    - New `Policy.PURCHASE` allows match (own garment only) and dismiss (with Not clothing). Restore, assign, quantity, split, merge and check stay admin-only.
+    - The "Not clothing" rule a member creates applies to the whole household, as it does for admins.
+20. **Suggestions are computed on the fly** from currently assigned cards. Keys: `line:<word>` (kids, toddler, girls, boys, baby, youth, juniors, tall, petite, plus, maternity), and `product:<store>:<first two words>`. An owner needs at least 2 similar assigned cards. Size-line keys beat product keys, and the higher count wins. Nothing is stored, so reassigning corrects suggestions immediately.
+21. **"Not clothing" still dismisses** (photos deleted, the product remembered for that store) rather than deleting the card, so Restore still works; with clothing-only on that card is gone from the inbox either way.
+22. **The panel is admins' view:** the member experience is in the app (API above). The panel inbox gains:
+    - ×N, the stepper and history with Split;
+    - Assign/Suggested, Merge…;
+    - owner filter chips;
+    - Select → Assign to…;
+    - in the match sheet, the choice "All N for one garment" or "1 of N".23. **Follow-up A, client compatibility:**
+    - `api_info` adds `api_versions_supported` ([1]) and `min_client` (1).
+    - The constants live in const.py next to `API_VERSION`.
+    - `hello` takes both fields optionally. `client_api_versions` defaults to [1], so a bare hello is compatible.
+    - A build below `min_client` is `client_too_old`, whatever versions it speaks.
+    - With no shared version: if every client version is newer than every server one, it's `server_too_old`; otherwise `client_too_old`.
+    - The answer also echoes `min_client` and `api_versions_supported`, an addition beyond the brief, so a client has everything in one reply.
+    - `hello` uses the read policy, like `api_info`, so a member locked out by "Admins only" still gets `unauthorized` (a separate signal for the app).
+    - Nothing is stored about clients.
+24. **Follow-up B, naming:**
+    - Only the sidebar title (`PANEL_TITLE`) and the panel's headings (Home page title, wide-screen top bar) changed to "Laundry Hub". The URL path stays `laundry`.
+    - User-facing text that named the panel ("the Laundry panel") now says "the Laundry Hub panel": four strings, one log hint, the media-browser message and the README.
+    - "Laundry" as a station, a zone or a colour name ("Laundry station", "Laundry teal") is unchanged.
+    - No screenshots are committed. CI regenerates them on every run, with the new heading.
+
 # Decisions (v0.2.5)
 
 Choices made while building v0.2.5 without asking. Each line: decision, then reason.

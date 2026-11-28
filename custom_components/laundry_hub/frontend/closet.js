@@ -157,33 +157,76 @@ function uniformOffers(ctx) {
       <button type="button" class="btn" data-act="declineUniform" data-store="${lib.esc(o.store_key)}">No thanks</button></div>`).join("");
 }
 
+// v0.2.6: one card per item with "×N", purchase history (Split), quantity
+// stepper, assignment (with suggestions), Merge, and bulk "Assign to…".
+function ownerFilterChips(ctx, cards) {
+  const { lib, data, state } = ctx;
+  const pick = state.filters.purchaseOwner || "all";
+  const count = (o) => cards.filter((c) => (o === "all" ? true : o === "none" ? !c.owner : c.owner === o)).length;
+  const opts = [["all", "All"], ["none", "Unassigned"], ...(data.persons || []).map((p) => [p.entity_id, p.name])];
+  return `<div class="chips" role="group" aria-label="Assigned to">${opts.map(([v, l]) => `<button type="button" class="chip" data-act="purchaseOwner" data-owner="${lib.esc(v)}" aria-pressed="${pick === v}">${lib.esc(l)} <span class="count">${count(v)}</span></button>`).join("")}</div>`;
+}
+
+function historyList(ctx, c) {
+  const { lib } = ctx;
+  const lines = c.history || [];
+  if (lines.length < 2 && Number(c.quantity || 1) < 2) return "";
+  return `<ul class="history" aria-label="Purchases">${lines.map((h) => `<li><span>${lib.esc([lib.shortDate(h.order_date), h.store, h.order_ref ? `#${h.order_ref}` : null, lib.money(h.unit_price, h.currency || c.currency), `×${h.quantity || 1}`].filter(Boolean).join(" · "))}</span>
+    ${lines.length > 1 ? `<button type="button" class="btn small" data-act="splitPurchase" data-card="${lib.esc(c.id)}" data-line="${lib.esc(h.id)}">Split</button>` : ""}</li>`).join("")}</ul>`;
+}
+
+function groupControls(ctx, c) {
+  const { lib } = ctx;
+  const qty = Number(c.quantity || 1);
+  const floor = (c.matches || []).reduce((n, m) => n + Number(m.units || 0), 0);
+  return `<div class="row wrap"><span class="sub">Quantity</span>
+      <span class="stepper"><button type="button" class="icon-btn" data-act="purchaseQty" data-card="${lib.esc(c.id)}" data-qty="${qty - 1}" aria-label="One fewer" ${qty <= Math.max(1, floor) ? "disabled" : ""}>−</button>
+        <span class="value" aria-live="polite">${qty}</span>
+        <button type="button" class="icon-btn" data-act="purchaseQty" data-card="${lib.esc(c.id)}" data-qty="${qty + 1}" aria-label="One more">+</button></span>
+      ${c.quantity_locked ? `<span class="sub">Set by you</span><button type="button" class="btn small" data-act="purchaseQtyReset" data-card="${lib.esc(c.id)}">Use the emails' count</button>` : ""}
+      <span class="spacer"></span>
+      <button type="button" class="btn small" data-act="openSheet" data-kind="assignPurchase" data-field="${lib.esc(c.id)}">${c.owner ? `For ${lib.esc(ctx.personName(c.owner))}` : "Assign to…"}</button>
+      ${c.suggested_owner ? `<button type="button" class="chip suggest" data-act="assignSuggested" data-card="${lib.esc(c.id)}" data-owner="${lib.esc(c.suggested_owner)}">Suggested: ${lib.esc(ctx.personName(c.suggested_owner))}</button>` : ""}</div>
+    ${historyList(ctx, c)}`;
+}
+
 function purchasesInbox(ctx) {
   const { lib, data, state } = ctx;
   const status = data.purchases || {};
   const archivedView = Boolean(state.filters.archivedPurchases);
   const archived = status.archived || [];
-  const cards = archivedView ? archived : lib.unmatchedCards(data);
+  const waiting = lib.unmatchedCards(data);
+  const pick = state.filters.purchaseOwner || "all";
+  const byOwner = (c) => (pick === "all" ? true : pick === "none" ? !c.owner : c.owner === pick);
+  const cards = (archivedView ? archived : waiting).filter(byOwner);
+  const psel = state.pselect || { on: false, ids: new Set() };
   const line = status.connected
     ? `Checked ${lib.esc(lib.timeAgo(status.last_check))}${status.last_error ? ` · last problem: ${lib.esc(status.last_error)}` : ""}`
     : "Purchase emails aren't connected. Connect them in Laundry Hub → Configure → Purchase emails.";
   const actionsFor = (c) => archivedView
     ? `<div class="row wrap"><span class="sub" style="flex:1">${c.status === "dismissed" ? "Dismissed" : "Archived"} ${lib.esc(lib.timeAgo(c.status_changed))}</span>
         <button type="button" class="btn primary" data-act="restorePurchase" data-card="${lib.esc(c.id)}">Restore</button></div>`
-    : `<div class="row wrap"><button type="button" class="btn primary" data-act="openSheet" data-kind="matchPurchase" data-field="${lib.esc(c.id)}">Match to garment</button>
+    : `${groupControls(ctx, c)}<div class="row wrap"><button type="button" class="btn primary" data-act="openSheet" data-kind="matchPurchase" data-field="${lib.esc(c.id)}">Match to garment</button>
+        <button type="button" class="btn" data-act="openSheet" data-kind="mergePurchase" data-field="${lib.esc(c.id)}">Merge…</button>
         <button type="button" class="btn" data-act="dismissPurchase" data-card="${lib.esc(c.id)}">Dismiss</button>
         <button type="button" class="btn" data-act="notClothing" data-card="${lib.esc(c.id)}">Not clothing</button></div>`;
   const empty = archivedView
     ? `<div class="card empty"><strong>Nothing archived</strong><span class="hint">Dismissed cards and cards archived after a while show up here.</span></div>`
     : `<div class="card empty"><strong>No purchases waiting</strong><span class="hint">New orders from the stores you chose show up here.</span></div>`;
-  const list = cards.length
-    ? `<div class="inbox">${cards.map((c) => `<div class="card inbox-item">${lib.purchaseCard(c)}${actionsFor(c)}</div>`).join("")}</div>`
-    : empty;
+  const item = (c) => psel.on && !archivedView
+    ? `<div class="card inbox-item">${lib.purchaseCard(c, { act: "togglePurchaseSelect", pressed: psel.ids.has(c.id), ownerName: ctx.personName })}</div>`
+    : `<div class="card inbox-item">${lib.purchaseCard(c, { ownerName: ctx.personName })}${actionsFor(c)}</div>`;
+  const list = cards.length ? `<div class="inbox">${cards.map(item).join("")}</div>` : empty;
   const chips = `<div class="chips" role="group" aria-label="Purchase views">
-      <button type="button" class="chip" data-act="purchasesView" data-view="new" aria-pressed="${!archivedView}">Waiting <span class="count">${lib.unmatchedCards(data).length}</span></button>
-      <button type="button" class="chip" data-act="purchasesView" data-view="archived" aria-pressed="${archivedView}">Archived <span class="count">${archived.length}</span></button></div>`;
-  return `${chips}<div class="row wrap" style="margin:8px 0"><span class="sub" style="flex:1">${line}</span>
+      <button type="button" class="chip" data-act="purchasesView" data-view="new" aria-pressed="${!archivedView}">Waiting <span class="count">${waiting.length}</span></button>
+      <button type="button" class="chip" data-act="purchasesView" data-view="archived" aria-pressed="${archivedView}">Archived <span class="count">${archived.length}</span></button>
+      ${archivedView ? "" : `<button type="button" class="chip" data-act="togglePurchaseSelectMode" aria-pressed="${psel.on}">${psel.on ? "Done" : "Select"}</button>`}</div>`;
+  const bar = psel.on && !archivedView ? `<div class="actionbar" role="region" aria-label="Selection actions">
+      <div class="row wrap"><strong>${psel.ids.size} selected</strong><span class="spacer"></span>
+      <button type="button" class="chip tall" data-act="openSheet" data-kind="assignPurchase" data-field="__selected" ${psel.ids.size ? "" : "disabled"}>Assign to…</button></div></div>` : "";
+  return `${chips}${ownerFilterChips(ctx, archivedView ? archived : waiting)}<div class="row wrap" style="margin:8px 0"><span class="sub" style="flex:1">${line}</span>
       ${status.connected && !archivedView ? `<button type="button" class="btn" data-act="checkPurchases" ${state.busy?.check ? "disabled" : ""}>${state.busy?.check ? "Checking…" : "Check now"}</button>` : ""}</div>
-    ${archivedView ? "" : uniformOffers(ctx)}${list}`;
+    ${archivedView ? "" : uniformOffers(ctx)}${list}${bar}`;
 }
 
 export function render(ctx) {
@@ -312,11 +355,40 @@ function matchSheet(ctx) {
     .filter((g) => !q || `${g.name} ${g.brand || ""} ${ctx.personName(g.owner)}`.toLowerCase().includes(q))
     .sort((a, b) => a.name.localeCompare(b.name))
     .slice(0, 40);
+  const left = Number(card.remaining ?? card.quantity ?? 1);
+  const one = state.sheet.units === 1;
+  const units = left > 1 ? `<div class="chips" role="group" aria-label="How many">
+      <button type="button" class="chip" data-act="matchUnits" data-units="all" aria-pressed="${!one}">All ${left} for one garment</button>
+      <button type="button" class="chip" data-act="matchUnits" data-units="1" aria-pressed="${one}">1 of ${left} (one garment each)</button></div>` : "";
   return `<div class="sheet-head"><h2>Match “${lib.esc(card.name)}”</h2><button type="button" class="icon-btn plain" data-act="closeSheet" aria-label="Close">${lib.ICON.close}</button></div>
-    <label class="search">${lib.ICON.search}<span class="sr-only">Search garments</span>
+    ${units}<label class="search">${lib.ICON.search}<span class="sr-only">Search garments</span>
       <input type="search" data-input="matchSearch" data-keep="matchSearch" placeholder="Search garments" value="${lib.esc(state.sheet.q || "")}"></label>
     <div class="stack">${garments.map((g) => `<button type="button" class="pick-row" data-act="matchPurchase" data-card="${lib.esc(card.id)}" data-id="${g.id}">
       <span class="avatar">${lib.esc(lib.initials(g.name))}</span><span style="flex:1;text-align:left">${lib.esc(g.name)}</span><span class="sub">${lib.esc(ctx.personName(g.owner))}</span></button>`).join("") || `<span class="hint">No garments match.</span>`}</div>`;
+}
+
+function assignSheet(ctx) {
+  const { lib, data, state } = ctx;
+  const target = state.sheet.field;
+  const bulk = target === "__selected";
+  const card = bulk ? null : (data.purchases?.cards || []).find((c) => c.id === target);
+  if (!bulk && !card) return `<p>That purchase is gone.</p>`;
+  const title = bulk ? `Assign ${state.pselect?.ids?.size || 0} purchases` : `Assign “${lib.esc(card.name)}”`;
+  const current = card?.owner ?? null;
+  const people = [{ entity_id: "", name: "Unassigned" }, ...(data.persons || [])];
+  return `<div class="sheet-head"><h2>${title}</h2><button type="button" class="icon-btn plain" data-act="closeSheet" aria-label="Close">${lib.ICON.close}</button></div>
+    <div class="stack">${people.map((p) => `<button type="button" class="pick-row" data-act="assignPurchase" data-owner="${lib.esc(p.entity_id)}" aria-pressed="${(current || "") === p.entity_id}">
+      <span class="avatar">${lib.esc(lib.initials(p.name))}</span><span style="flex:1;text-align:left">${lib.esc(p.name)}</span>${card?.suggested_owner === p.entity_id ? `<span class="sub">Suggested</span>` : ""}</button>`).join("")}</div>`;
+}
+
+function mergeSheet(ctx) {
+  const { lib, data, state } = ctx;
+  const card = (data.purchases?.cards || []).find((c) => c.id === state.sheet.field);
+  if (!card) return `<p>That purchase is gone.</p>`;
+  const others = [...(data.purchases?.cards || []), ...(data.purchases?.archived || [])].filter((c) => c.id !== card.id && c.status !== "matched");
+  return `<div class="sheet-head"><h2>Merge “${lib.esc(card.name)}” with…</h2><button type="button" class="icon-btn plain" data-act="closeSheet" aria-label="Close">${lib.ICON.close}</button></div>
+    <span class="hint">The two cards become one, with both purchases and quantities.</span>
+    <div class="stack">${others.map((o) => lib.purchaseCard(o, { act: "mergePurchase", attrs: `data-other="${lib.esc(o.id)}"` })).join("") || `<span class="hint">No other cards to merge with.</span>`}</div>`;
 }
 
 export function renderSheet(ctx) {
@@ -327,6 +399,8 @@ export function renderSheet(ctx) {
   else if (sheet.kind === "bulk") inner = bulkSheet(ctx, sheet.field);
   else if (sheet.kind === "setfield") inner = setFieldSheet(ctx);
   else if (sheet.kind === "matchPurchase") inner = matchSheet(ctx);
+  else if (sheet.kind === "assignPurchase") inner = assignSheet(ctx);
+  else if (sheet.kind === "mergePurchase") inner = mergeSheet(ctx);
   else if (sheet.kind === "confirmDelete") {
     inner = `<h2>Delete ${state.select.ids.size} garment(s)?</h2><p class="hint" style="margin:0">Their tags become unknown again. This can't be undone.</p>
       <div class="row"><button type="button" class="btn" data-act="closeSheet">Cancel</button><span class="spacer"></span><button type="button" class="btn primary" style="background:var(--hub-problem)" data-act="bulkDelete">Delete</button></div>`;
@@ -385,8 +459,48 @@ export const actions = {
     if (await ctx.ws("purchases/uniform", { store_key: el.dataset.store, accept: false })) ctx.reload();
   },
   matchSearch(ctx, el) { ctx.state.sheet.q = el.value; ctx.render(); },
+  matchUnits(ctx, el) { ctx.state.sheet.units = el.dataset.units === "1" ? 1 : null; ctx.render(); },
+  purchaseOwner(ctx, el) { ctx.state.filters.purchaseOwner = el.dataset.owner; ctx.render(); },
+  togglePurchaseSelectMode(ctx) {
+    const on = !(ctx.state.pselect?.on);
+    ctx.state.pselect = { on, ids: new Set() };
+    ctx.render();
+  },
+  togglePurchaseSelect(ctx, el) {
+    const ids = ctx.state.pselect.ids;
+    if (ids.has(el.dataset.card)) ids.delete(el.dataset.card); else ids.add(el.dataset.card);
+    ctx.render();
+  },
+  async purchaseQty(ctx, el) {
+    if (await ctx.ws("purchases/set_quantity", { card_id: el.dataset.card, quantity: Number(el.dataset.qty) })) ctx.reload();
+  },
+  async purchaseQtyReset(ctx, el) {
+    if (await ctx.ws("purchases/set_quantity", { card_id: el.dataset.card, quantity: null })) ctx.reload();
+  },
+  async splitPurchase(ctx, el) {
+    if (await ctx.ws("purchases/split", { card_id: el.dataset.card, purchase_id: el.dataset.line })) { ctx.toast("Split into its own card"); ctx.reload(); }
+  },
+  async mergePurchase(ctx, el) {
+    const res = await ctx.ws("purchases/merge", { card_id: ctx.state.sheet.field, other_id: el.dataset.other });
+    if (res) { ctx.toast(`Merged: ×${res.quantity}`); ctx.update({ sheet: null }); ctx.reload(); }
+  },
+  async assignPurchase(ctx, el) {
+    const target = ctx.state.sheet.field;
+    const ids = target === "__selected" ? [...(ctx.state.pselect?.ids || [])] : [target];
+    const owner = el.dataset.owner || null;
+    if (await ctx.ws("purchases/assign", { card_ids: ids, owner })) {
+      ctx.toast(owner ? `Assigned to ${ctx.personName(owner)}` : "Unassigned");
+      if (target === "__selected") ctx.state.pselect = { on: false, ids: new Set() };
+      ctx.update({ sheet: null });
+      ctx.reload();
+    }
+  },
+  async assignSuggested(ctx, el) {
+    if (await ctx.ws("purchases/assign", { card_id: el.dataset.card, owner: el.dataset.owner })) { ctx.toast(`Assigned to ${ctx.personName(el.dataset.owner)}`); ctx.reload(); }
+  },
   async matchPurchase(ctx, el) {
-    const res = await ctx.ws("purchases/match", { card_id: el.dataset.card, garment_id: el.dataset.id });
+    const units = ctx.state.sheet?.units === 1 ? { units: 1 } : {};
+    const res = await ctx.ws("purchases/match", { card_id: el.dataset.card, garment_id: el.dataset.id, ...units });
     if (res) { ctx.toast(`Matched to ${res.name}`); ctx.update({ sheet: null }); ctx.reload(); }
   },
   async dismissPurchase(ctx, el) {

@@ -218,7 +218,7 @@
         "invalid_name": "Enter a name of 1–100 characters.",
         "name_exists": "A wash bin with this name already exists.",
         "invalid_color": "Pick a valid RGB color.",
-        "zone_in_use": "{name} is used by {count} garment(s). Reassign them first in the Laundry panel (Garments → Bulk reassign).",
+        "zone_in_use": "{name} is used by {count} garment(s). Reassign them first in the Laundry Hub panel (Garments → Bulk reassign).",
         "not_loaded": "Laundry Hub must be loaded to delete entries."
       },
       "abort": {
@@ -272,7 +272,7 @@
         "invalid_name": "Enter a name of 1–100 characters.",
         "name_exists": "A dry type with this name already exists.",
         "invalid_color": "Pick a valid RGB color.",
-        "zone_in_use": "{name} is used by {count} garment(s). Reassign them first in the Laundry panel (Garments → Bulk reassign).",
+        "zone_in_use": "{name} is used by {count} garment(s). Reassign them first in the Laundry Hub panel (Garments → Bulk reassign).",
         "not_loaded": "Laundry Hub must be loaded to delete entries."
       },
       "abort": {
@@ -365,7 +365,7 @@
       "message": "Select garments or a source wash bin / dry type."
     },
     "zone_in_use": {
-      "message": "{name} is used by {count} garment(s). Reassign them first (Laundry panel → Garments → Bulk reassign)."
+      "message": "{name} is used by {count} garment(s). Reassign them first (Laundry Hub panel → Garments → Bulk reassign)."
     },
     "photo_type": {
       "message": "Unsupported photo type."
@@ -459,12 +459,24 @@
     },
     "tag_not_yours": {
       "message": "Tap the new tag with your phone first, then add it."
+    },
+    "quantity_too_low": {
+      "message": "Some of these are already matched to garments; the quantity can't be lower than that."
+    },
+    "cannot_split": {
+      "message": "That purchase can't be split off."
+    },
+    "cannot_merge": {
+      "message": "Those purchase cards can't be merged."
+    },
+    "unknown_purchase_line": {
+      "message": "That purchase isn't in this card."
     }
   },
   "issues": {
     "zone_restored": {
       "title": "{name} was restored",
-      "description": "{name} was deleted but {count} garment(s) still use it, so it was restored. Open the Laundry panel, use Garments → Bulk reassign to move those garments, then delete it from its edit dialog."
+      "description": "{name} was deleted but {count} garment(s) still use it, so it was restored. Open the Laundry Hub panel, use Garments → Bulk reassign to move those garments, then delete it from its edit dialog."
     },
     "purchase_email_auth": {
       "title": "Purchase emails can't log in",

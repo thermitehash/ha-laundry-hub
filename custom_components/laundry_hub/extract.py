@@ -191,14 +191,17 @@ _DETAIL_HELP = (
 _APPAREL_FIELDS: dict[str, dict[str, Any]] = {
     "name": _TEXT,
     "is_apparel": _BOOLEAN,
+    "is_health": _BOOLEAN,  # medication or health products: never stored (v0.2.6)
     "quantity": _TEXT,
     "unit_price": _TEXT,
+    "line_total": _TEXT,  # when only a line total is printed (v0.2.6)
 }
 _LOOK_FIELDS: dict[str, dict[str, Any]] = {
     "name": _TEXT,
     "colour": _TEXT,
     "size": _TEXT,
     "cut": _TEXT,
+    "brand": _TEXT,  # v0.2.6
     "product_url": _TEXT,  # keeps the product link when the split is used
 }
 
@@ -218,12 +221,12 @@ def item_structure() -> probatio.Schema:
 
 
 def apparel_structure() -> probatio.Schema:
-    """Pass 2, split (a): is_apparel, quantity and unit price."""
+    """Pass 2, split (a): is_apparel, is_health, quantity and price."""
     return _schema(_items(_APPAREL_FIELDS, _DETAIL_HELP))
 
 
 def look_structure() -> probatio.Schema:
-    """Pass 2, split (b): colour, size, cut and the product link."""
+    """Pass 2, split (b): colour, size, cut, brand and the product link."""
     return _schema(
         _items(
             _LOOK_FIELDS,
@@ -300,6 +303,7 @@ class Item:
     product_url: str | None = None
     image_url: str | None = None
     is_apparel: bool = True
+    is_health: bool = False
 
 
 @dataclass(slots=True)
@@ -358,6 +362,33 @@ def _verbatim(url: Any, sent: str) -> str | None:
     return text if text in sent else None
 
 
+_SUFFIX = re.compile(r"^(?P<name>.+?)\s+[-–]\s+(?P<rest>[^-–]+/[^-–]+)$")
+
+
+def split_suffix(
+    name: str, color: str | None, size: str | None, cut: str | None
+) -> tuple[str, str | None, str | None, str | None]:
+    """Split a " - A / B[ / C]" name suffix into empty colour/size/cut fields.
+
+    "Ferrosi Pants - Black / M / Tall" → ("Ferrosi Pants", "Black", "M",
+    "Tall"). Fields that already have a value keep it; the name is cleaned
+    only when the suffix was split.
+    """
+    match = _SUFFIX.match(name)
+    if match is None:
+        return name, color, size, cut
+    parts = [" ".join(p.split()) for p in match.group("rest").split("/")]
+    if not 2 <= len(parts) <= 3 or not all(parts) or any(len(p) > 30 for p in parts):
+        return name, color, size, cut
+    parts += [""] * (3 - len(parts))
+    return (
+        match.group("name").strip(),
+        color or parts[0] or None,
+        size or parts[1] or None,
+        cut or parts[2] or None,
+    )
+
+
 def validate(raw: Any, sent_text: str, *, clothing_only: bool) -> Order:
     """Validate an AI answer against the email text (TypeError if not an object)."""
     if not isinstance(raw, dict):
@@ -377,6 +408,8 @@ def validate(raw: Any, sent_text: str, *, clothing_only: bool) -> Order:
         name = _clean(entry.get("name"), 100)
         if not name:
             continue
+        if entry.get("is_health") is True:
+            continue  # medication or health: never stored, never logged by name
         apparel = entry.get("is_apparel")
         is_apparel = apparel is not False  # unknown counts as clothing
         if clothing_only and not is_apparel:
@@ -391,16 +424,25 @@ def validate(raw: Any, sent_text: str, *, clothing_only: bool) -> Order:
             )
             if given and not kept
         )
-        quantity = _number(entry.get("quantity"))  # "2", 2, None → 1 if missing
+        quantity_raw = _number(entry.get("quantity"))  # "2", 2, None → 1
+        quantity = max(1, int(quantity_raw)) if quantity_raw else 1
+        unit_price = _number(entry.get("unit_price"))
+        total = _number(entry.get("line_total"))
+        if unit_price is None and total is not None:
+            unit_price = round(total / quantity, 2)
+        color = _clean(entry.get("color") or entry.get("colour"), 40)
+        size = _clean(entry.get("size"), 20)
+        cut = _clean(entry.get("cut"), 30)
+        name, color, size, cut = split_suffix(name, color, size, cut)
         order.items.append(
             Item(
                 name=name,
                 brand=_clean(entry.get("brand"), 60),
-                color=_clean(entry.get("color") or entry.get("colour"), 40),
-                size=_clean(entry.get("size"), 20),
-                cut=_clean(entry.get("cut"), 30),
-                quantity=max(1, int(quantity)) if quantity else 1,
-                unit_price=_number(entry.get("unit_price")),
+                color=color,
+                size=size,
+                cut=cut,
+                quantity=quantity,
+                unit_price=unit_price,
                 product_url=product_url,
                 image_url=image_url,
                 is_apparel=is_apparel,
@@ -576,3 +618,45 @@ async def extract(
                 )
     raw["items"] = entries
     return validate(raw, text, clothing_only=clothing_only)
+
+
+def classify_instructions(names: list[str]) -> str:
+    """Prompt for re-classifying stored product names (no email text)."""
+    listed = "\n".join(f"- {name}" for name in names)
+    return "\n".join(
+        [
+            "For each product name below, say whether it is clothing.",
+            "is_apparel is true only for clothing, shoes and wearable accessories.",
+            "is_health is true for medication, supplements, medical or health",
+            "products. Copy each name exactly as listed. Leave quantity, unit_price",
+            "and line_total empty.",
+            "Products:",
+            listed,
+        ]
+    )
+
+
+async def classify(
+    hass: Any,
+    *,
+    entity_id: str,
+    names: list[str],
+    on_schema_error: SchemaErrorHook | None = None,
+) -> list[dict[str, Any]]:
+    """is_apparel / is_health per name, in batches (v0.2.6 cleanup).
+
+    Uses the small step-2 request (a) structure. A failed batch raises; the
+    caller keeps those cards (deletion fails closed).
+    """
+    out: list[dict[str, Any]] = []
+    for start in range(0, len(names), BATCH_SIZE):
+        batch = names[start : start + BATCH_SIZE]
+        raw = await _ask(
+            hass,
+            entity_id,
+            classify_instructions(batch),
+            "item_apparel",
+            on_schema_error,
+        )
+        out.extend(_by_name(batch, raw.get("items"), ("is_apparel", "is_health")))
+    return out

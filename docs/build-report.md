@@ -1,3 +1,73 @@
+# Laundry Hub build report: v0.2.6
+- Version: 0.2.6 / Date: 2026-11-28 / Repo: https://github.com/thermitehash/ha-laundry-hub
+- PR: https://github.com/thermitehash/ha-laundry-hub/pull/9 (not merged). v0.2.5 was merged in PR #8 (`e83bf13`) and released as `v0.2.5`.
+- Commits: `b110f26` (code), `c947285` (follow-up: client compatibility, "Laundry Hub" sidebar name); the build report is a docs-only commit
+- CI: workflow **Validate** on PR #9 (see the latest run)
+
+## Summary
+- **Grouping:** one card per item.
+  - Confirmation, shipping and delivery emails of one order fill the same card and never add up.
+  - A new order of the same item joins the group with its own history line and quantity.
+  - Rules live in `grouping.py`: ref normalization (case, spaces, "-", "#", shipment suffix, leading-letter prefix), item keys without suffixes or field words, the email kind from the subject, and 14 days for ref-less emails.
+- **Quantity:** stepper, lockable (`purchases/set_quantity`), plus Split and Merge.
+- **Matching up to N:** a group of N matches up to N garments (`units`) and stays in the inbox until every unit is used.
+- **One-time cleanup** of older cards:
+  - re-classify with step-2 request (a), by name;
+  - delete non-apparel (clothing-only) and health items with photos, failing closed;
+  - group duplicates, split name suffixes;
+  - log counts only; Settings shows them once.
+- **Privacy:**
+  - non-apparel and health items are never stored;
+  - Amazon Pharmacy mail is rejected before any body fetch;
+  - marketing makes no card.
+- **Fields:**
+  - brand is back (request (b), 7 fields);
+  - `is_health` and `line_total` added to request (a), 7 fields; the full item request is at the 12-field budget;
+  - the cut maps to fit or size.cut on match; name suffixes are split; unit price is computed from a line total.
+- **Shopify:**
+  - Amalli Talli is built in, matched by display name or shop id;
+  - shop ids are learned for user-added names;
+  - Gmail adds `from:store+<id>@`;
+  - other shops are never body-fetched.
+- **Follow-up A, client compatibility:**
+  - `api_info` adds `api_versions_supported` ([1]) and `min_client` (1);
+  - an optional `laundry_hub/hello {client_api_versions, client_build}` answers `{compatible, reason, api_version}` (plus `min_client` and `api_versions_supported`);
+  - the version policy is documented in docs/app-api.md;
+  - clients that never say hello are unaffected.
+- **Follow-up B, naming:** the sidebar title and panel heading are now "Laundry Hub"; the URL stays `/laundry`. "the Laundry panel" became "the Laundry Hub panel" in strings, README and messages.
+- **Assignment:**
+  - per-card and bulk `purchases/assign`, owner filters;
+  - suggestions after two similar assignments (never automatic);
+  - members see and use only their assigned cards (`Policy.PURCHASE`);
+  - capabilities `purchase_assign` and `purchase_groups`.
+
+## Tests
+- 378 pytest (coverage 95 %).
+- New `tests/test_v026.py` (22):
+  - six duplicate patterns → one group each;
+  - a later order adds quantity with its own line;
+  - locked quantity, split, merge, matching up to N, partial dismiss;
+  - normalization rules;
+  - the cleanup on a Heather-shaped store (3 removed, 3 grouped, 1 split, matched untouched, shown once, names never logged);
+  - the cleanup keeps cards when the AI fails;
+  - a mixed Amazon order → only the shorts; pharmacy mail never fetched; health items never stored or logged; marketing makes no card;
+  - brand, cut, suffix and line total extracted; fit vs size.cut on match; a user-set brand kept;
+  - Amalli Talli by name and by shop id, other shops header-only;
+  - shop-id learning; Shopify rules;
+  - assignment, visibility, member actions and refusals, suggestions, bulk assign, photo access;
+  - classify batches stay within the budget;
+  - api_info fields; `hello` answers compatible, client_too_old (old build or dropped version) and server_too_old; a client without hello is unaffected;
+  - the registered panel's sidebar_title is "Laundry Hub" and its url_path is still "laundry".
+- The panel smoke test now expects the "Laundry Hub" heading. It covers ×N, the stepper and unlock, split, suggested and manual assign, merge, bulk assign, owner filters, match 1 of N, and the Settings cleanup line.
+
+## Needs a person
+- Heather's install: after updating, the first check runs the cleanup. Settings should show "Cleaned up: X non-clothing removed, Y duplicates grouped". The 45 new cards should shrink (the 10 duplicate pairs grouped), and the non-clothing cards should be gone.
+- An Amalli Talli order arriving after the update becomes a card.
+- In the app (when it's built), a family member sees only the cards assigned to them.
+- After updating, the sidebar shows "Laundry Hub" and old /laundry bookmarks still open it.
+
+---
+
 # Laundry Hub build report: v0.2.5
 - Version: 0.2.5 / Date: 2026-11-28 / Repo: https://github.com/thermitehash/ha-laundry-hub
 - PR: https://github.com/thermitehash/ha-laundry-hub/pull/8 (not merged). v0.2.4 was merged in PR #7 (`c2a5006`) and released as `v0.2.4`.

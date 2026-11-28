@@ -306,6 +306,12 @@ def payloads(hub: LaundryHub, gid: str) -> dict[str, dict[str, Any]]:
         "purchases/uniform": {"store_key": "blauer"},
         "purchases/check": {},
         "purchases/retry_unreadable": {},
+        "purchases/set_quantity": {"card_id": "c", "quantity": 2},
+        "purchases/split": {"card_id": "c", "purchase_id": "p"},
+        "purchases/merge": {"card_id": "c", "other_id": "d"},
+        "purchases/assign": {"card_id": "c", "owner": None},
+        "purchases/cleanup_seen": {},
+        "hello": {"client_api_versions": [1], "client_build": 1},
     }
 
 
@@ -328,11 +334,13 @@ async def test_every_command_declares_a_policy(hass: HomeAssistant) -> None:
         name for name, h in commands.items() if h.laundry_policy is not Policy.ADMIN
     }
     # v0.2.4: members may enrol (garment/create); describe_fields and
-    # reset_field became admin-only (Heather's answer).
+    # reset_field became admin-only (Heather's answer). v0.2.6: members may
+    # match and dismiss purchase cards assigned to them.
     assert member_ok == {
         "data", "api_info", "changes", "subscribe", "photo/url", "tap",
         "garment/create", "garment/update", "garment/wardrobe",
         "photo/upload", "photo/delete", "photo/remove", "photo/reorder",
+        "purchases/match", "purchases/dismiss", "hello",
     }  # fmt: skip
 
 

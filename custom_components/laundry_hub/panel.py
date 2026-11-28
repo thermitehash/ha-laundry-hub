@@ -17,7 +17,13 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.http import KEY_HASS
 
-from .access import Caller, caller_for, can_edit_garment, can_see_garment
+from .access import (
+    Caller,
+    caller_for,
+    can_edit_garment,
+    can_see_card,
+    can_see_garment,
+)
 from .const import (
     DOMAIN,
     PANEL_COMPONENT,
@@ -101,7 +107,8 @@ def _may_see_photo(hub: Any, caller: Caller, filename: str) -> bool:
     """A garment's (or purchase card's) photo, visible to this caller.
 
     Admins see every photo. A member (household access) sees photos of their
-    own garments and of purchase cards matched to them. Anything else is 404.
+    own garments and of purchase cards assigned or matched to them. Anything
+    else is 404.
     """
     if not caller.allowed:
         return False
@@ -118,10 +125,7 @@ def _may_see_photo(hub: Any, caller: Caller, filename: str) -> bool:
         for card in hub.catalog.purchases.values():
             if name not in (card.get("photos") or []):
                 continue
-            if caller.is_admin:
-                return True
-            garment = hub.catalog.garments.get(str(card.get("garment_id")))
-            if garment is not None and can_see_garment(caller, garment):
+            if can_see_card(caller, hub, card):
                 return True
     return False
 

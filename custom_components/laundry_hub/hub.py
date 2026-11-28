@@ -882,7 +882,7 @@ class LaundryHub:
             raise validation_error(
                 "zone_in_use",
                 f"{zone.name} is used by {count} garment(s); reassign them first "
-                "(Laundry panel → Garments → Bulk reassign)",
+                "(Laundry Hub panel → Garments → Bulk reassign)",
                 name=zone.name,
                 count=count,
             )
