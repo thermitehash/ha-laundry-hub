@@ -175,6 +175,8 @@ deletes the stored address and password and asks whether to keep or delete exist
   row of cards. Tapping one fills in the name, brand, size, purchase details and photo (the
   photo is copied, so dismissing the card later never deletes it). *None of these* carries
   on as normal. Nothing is ever matched automatically.
+- **Finding them:** Home shows "Purchases · N to review" whenever cards are waiting, the
+  Closet tab shows the count, and `/laundry?tab=closet&view=purchases` opens Purchases.
 - **Closet → Purchases:** one card per item. Emails about the same order (confirmation,
   shipping, delivery) never add up; buying the same item again adds to the card's quantity
   ("×2") with its own line in the card's purchase history. Each card offers *Match to

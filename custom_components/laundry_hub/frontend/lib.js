@@ -180,3 +180,36 @@ export function purchaseCard(card, { act = "", attrs = "", pressed = null, owner
     <div class="pbody"><span class="name">${esc(card.name)}${badge ? ` ${badge}` : ""}</span><span class="meta">${esc(meta)}</span>
       ${look ? `<span class="meta">${esc(look)}</span>` : ""}${owner}</div></${tag}>`;
 }
+
+// v0.2.8: every error that becomes text goes through here. HA's websocket can
+// reject with objects that have no `message` (connection not ready, a
+// reconnect, nested {error:{...}}): never show "[object Object]".
+const CODE_TEXT = {
+  1: "Can't connect to Home Assistant",
+  2: "Home Assistant needs you to log in again",
+  3: "Lost connection to Home Assistant",
+  unknown_command: "Laundry Hub is still starting",
+  not_loaded: "Laundry Hub is still starting",
+};
+const usable = (v) => (typeof v === "string" && v.trim() && !v.includes("[object Object]") ? v.trim() : null);
+
+export function errorText(err, fallback = "Something went wrong") {
+  if (err === null || err === undefined) return fallback;
+  if (typeof err === "string") return usable(err) || fallback;
+  const msg = usable(err.message) || usable(err.error?.message) || usable(err.body?.message);
+  if (msg) return msg;
+  const code = err.code ?? err.error?.code;
+  if (code !== undefined && CODE_TEXT[code]) return CODE_TEXT[code];
+  if (usable(String(code ?? ""))) return `Error: ${code}`;
+  try {
+    const json = JSON.stringify(err);
+    if (json && json !== "{}" && json !== "null") return json.length > 120 ? `${json.slice(0, 117)}…` : json;
+  } catch (_e) { /* circular: fall through */ }
+  return usable(String(err)) || fallback;
+}
+
+// Errors that mean "not ready yet / reconnecting": the first load retries quietly.
+export function isTransient(err) {
+  const code = err?.code ?? err?.error?.code;
+  return code === 1 || code === 3 || code === "unknown_command" || code === "not_loaded";
+}

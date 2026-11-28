@@ -20,6 +20,11 @@
 - **Members:** create untagged garments for themselves, set manual states, and attach/replace/remove tags on their own garments.
 - **Not clothing** keeps the card's photos; archived and dismissed cards are purged with their photos after a year.
 - **v0.2.6 release notes:** "Install v0.2.7 or later instead" line added.
+- **Bug, "[object Object]" toast at startup:**
+  - one `lib.errorText()` for every error path, with readable text for HA's message-less rejections;
+  - every failure is logged with its command;
+  - the first load is single-flight and retries quietly while reconnecting or before the integration is ready (backoff to 30 s, then one clear message).
+- **Purchases easy to find:** the Home card "Purchases · N to review" with thumbnails, a Closet tab badge, and the `?tab=closet&view=purchases` deep link.
 
 ## Tests
 - 386 pytest (coverage 95 %).
@@ -34,7 +39,11 @@
 - The panel smoke test covers:
   - the No tag badge and filter;
   - quick actions; attach, waiting, then the conflict → Move tag here; Replace/Remove on a tagged garment;
-  - No tag in Add; Link from *Seen recently*.
+  - No tag in Add; Link from *Seen recently*;
+  - errorText for `{code:3}`, nested `{error:{message}}`, plain objects and empty objects (never "[object Object]");
+  - a load during a reconnect retries with no toast;
+  - overlapping loads collapse to one call;
+  - the Home Purchases card count, opening Purchases, the Closet tab badge and the deep link.
 
 ## Needs a person
 - Add a garment without a tag, set "To laundry" / "Clean / put away", then Attach tag by tapping it at a station within 2 minutes.

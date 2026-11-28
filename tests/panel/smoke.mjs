@@ -95,12 +95,16 @@ function data(wardrobe) {
 const failures = [];
 const fail = (msg) => { console.error("FAIL:", msg); failures.push(msg); };
 
-async function setup(browser, viewport, wardrobe) {
+async function setup(browser, viewport, wardrobe, opts = {}) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1 });
   const page = await context.newPage();
   const errors = [];
+  const logged = []; // the panel's own "Laundry Hub: <command> failed" logs (handled errors)
   page.on("pageerror", (e) => errors.push(String(e)));
-  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  page.on("console", (m) => {
+    if (m.type() !== "error") return;
+    if (m.text().startsWith("Laundry Hub: ")) logged.push(m.text()); else errors.push(m.text());
+  });
   await page.route("http://hub.test/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/laundry") {
@@ -114,15 +118,21 @@ async function setup(browser, viewport, wardrobe) {
     return route.fulfill({ status: 404, body: "" });
   });
   await page.goto("http://hub.test/laundry");
-  await page.evaluate(async ({ payload }) => {
+  await page.evaluate(async ({ payload, opts }) => {
     window.__calls = [];
     window.__listeners = {};
     window.__payload = payload;
+    window.__failData = opts.failData || 0; // the first N data calls reject like a reconnect
+    window.__slowData = 0;
     const hass = {
       themes: { darkMode: false },
       callWS: async (msg) => {
         window.__calls.push(msg);
-        if (msg.type === "laundry_hub/data") return JSON.parse(JSON.stringify(window.__payload));
+        if (msg.type === "laundry_hub/data") {
+          if (window.__failData > 0) { window.__failData -= 1; throw { code: 3 }; }
+          if (window.__slowData) await new Promise((r) => setTimeout(r, window.__slowData));
+          return JSON.parse(JSON.stringify(window.__payload));
+        }
         if (msg.type === "laundry_hub/garment/create" && msg.uid === "bad") throw { message: "Invalid tag UID bad" };
         if (msg.type === "laundry_hub/garment/create") return { ...payload.garments[0], id: "g01" };
         if (msg.type === "laundry_hub/garment/attach_tag" && msg.uid === "INUSE" && !msg.move) throw { code: "tag_in_use", message: "That tag belongs to Red sweater; move it here instead?" };
@@ -140,9 +150,9 @@ async function setup(browser, viewport, wardrobe) {
     const el = document.createElement("laundry-hub-panel");
     document.body.appendChild(el);
     el.hass = hass;
-  }, { payload: data(wardrobe) });
+  }, { payload: data(wardrobe), opts });
   await page.waitForFunction(() => document.querySelector("laundry-hub-panel")?.shadowRoot?.querySelector("main .page-head"));
-  return { context, page, errors };
+  return { context, page, errors, logged };
 }
 
 const sr = (page, fn, arg) => page.evaluate(([f, a]) => {
@@ -165,6 +175,16 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   // Home
   let t = await text(page);
   for (const s of ["Laundry Hub", "Closet 1", "Darks", "Drying", "Missing (not seen in 14 days)"]) if (!t.includes(s)) fail(`${tag} home: missing "${s}"`);
+  // v0.2.8: Purchases is easy to find: a Home card with the count, a Closet tab badge.
+  if (!t.includes("Purchases · 4 to review")) fail(`${tag} home: purchases card count`);
+  const badgeText = await sr(page, "return root.querySelector('.tabbar [data-tab=closet] .tab-badge, .segmented [data-tab=closet] .tab-badge')?.textContent || ''");
+  if (badgeText !== "4") fail(`${tag}: closet tab badge ${badgeText}`);
+  await click(page, '[data-act="openPurchases"]'); await settle(page);
+  t = await text(page);
+  if (!t.includes("Match to garment") || !t.includes("All garments")) fail(`${tag}: home card did not open Purchases`);
+  if (!(await page.evaluate(() => window.location.search)).includes("view=purchases")) fail(`${tag}: purchases deep link not written`);
+  await click(page, '[data-act="togglePurchases"]'); await settle(page);
+  await click(page, '[data-act="tab"][data-tab="home"]'); await settle(page);
   if (await page.evaluate(() => window.__xss)) fail(`${tag}: XSS executed`);
   if (await sr(page, "return !!root.querySelector('img[src=x]')")) fail(`${tag}: unescaped HTML`);
   await noHScroll(page, `${tag} home`);
@@ -406,6 +426,72 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   if (d.includes("Re-describe") || d.includes("Purchase")) fail("wardrobe off: wardrobe detail shown");
   await shot(page, "phone-wardrobe-off-detail");
   if (errors.length) fail(`wardrobe off: errors ${errors.join(" | ")}`);
+  await context.close();
+}
+
+// v0.2.8: error text never shows "[object Object]"; loads never overlap; a load
+// during a reconnect retries quietly; ?tab=closet&view=purchases opens Purchases.
+{
+  const { context, page, errors, logged } = await setup(browser, { width: 390, height: 844 }, true, { failData: 2 });
+  // The first two data calls failed like a reconnect: no toast, then the data.
+  if (await sr(page, "return Boolean(root.querySelector('.toast'))")) fail("reconnect at startup: a toast was shown");
+  const dataCalls = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/data").length);
+  if (dataCalls !== 3) fail(`reconnect at startup: ${dataCalls} data calls (want 3)`);
+  if (!logged.some((l) => l.includes("laundry_hub/data failed"))) fail("reconnect at startup: raw error not logged");
+  if (!(await text(page)).includes("Purchases · 4 to review")) fail("reconnect at startup: data not shown");
+  // errorText covers HA's message-less rejections.
+  const texts = await page.evaluate(async () => {
+    const lib = await import("/laundry_hub_static/lib.js?v=0.2.0");
+    return [
+      lib.errorText({ code: 3 }),
+      lib.errorText({ error: { code: "not_found", message: "Nested message" } }),
+      lib.errorText({ code: "unknown_command" }),
+      lib.errorText({ foo: { bar: 1 } }),
+      lib.errorText({}),
+      lib.errorText(new Error("Plain error")),
+      lib.errorText({ message: { nested: true } }),
+      String(lib.isTransient({ code: 3 })),
+    ];
+  });
+  const want = ["Lost connection to Home Assistant", "Nested message", "Laundry Hub is still starting"];
+  want.forEach((w, i) => { if (texts[i] !== w) fail(`errorText case ${i}: ${texts[i]}`); });
+  if (texts.some((x) => x.includes("[object Object]"))) fail(`errorText shows [object Object]: ${texts.join(" | ")}`);
+  if (texts[4] !== "Something went wrong" || texts[5] !== "Plain error" || texts[7] !== "true") fail(`errorText fallbacks: ${texts.join(" | ")}`);
+  // Overlapping loads (init, "ready", change events) collapse to one call.
+  const before = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/data").length);
+  await page.evaluate(async () => {
+    window.__slowData = 300;
+    const el = document.querySelector("laundry-hub-panel");
+    const a = el._load();
+    (window.__listeners.ready || []).forEach((fn) => fn());
+    const b = el._load();
+    await Promise.all([a, b]);
+    window.__slowData = 0;
+  });
+  const after = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/data").length);
+  if (after - before !== 1) fail(`overlapping loads made ${after - before} calls`);
+  if (errors.length) fail(`startup/error tests: errors ${errors.join(" | ")}`);
+  await context.close();
+}
+{
+  const { context, page, errors } = await setup(browser, { width: 390, height: 844 }, true);
+  await page.goto("http://hub.test/laundry?tab=closet&view=purchases");
+  await page.evaluate(async ({ payload }) => {
+    const hass = {
+      themes: { darkMode: false },
+      callWS: async (msg) => (msg.type === "laundry_hub/data" ? JSON.parse(JSON.stringify(payload)) : {}),
+      fetchWithAuth: async () => ({ ok: true, json: async () => ({}) }),
+      connection: { subscribeMessage: async () => () => {}, addEventListener: () => {} },
+    };
+    await import("/laundry_hub_static/laundry-panel.js?v=0.2.0");
+    const el = document.createElement("laundry-hub-panel");
+    document.body.appendChild(el);
+    el.hass = hass;
+  }, { payload: data(true) });
+  await page.waitForFunction(() => document.querySelector("laundry-hub-panel")?.shadowRoot?.querySelector("main .page-head"));
+  await settle(page);
+  if (!(await text(page)).includes("Match to garment")) fail("deep link ?tab=closet&view=purchases did not open Purchases");
+  if (errors.length) fail(`deep link: errors ${errors.join(" | ")}`);
   await context.close();
 }
 

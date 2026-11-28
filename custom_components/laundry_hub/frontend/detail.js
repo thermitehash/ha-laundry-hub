@@ -202,12 +202,13 @@ async function attachCall(ctx, payload) {
   try {
     return await ctx.hass.callWS({ type: "laundry_hub/garment/attach_tag", ...payload });
   } catch (err) {
+    console.error("Laundry Hub: laundry_hub/garment/attach_tag failed", err);
     if (err && err.code === "tag_in_use") {
-      ctx.state.tagConflict = { garment: payload.garment_id, uid: payload.uid, replace: Boolean(payload.replace), name: (err.message || "").replace(/^That tag belongs to (.*?);.*$/, "$1") };
+      ctx.state.tagConflict = { garment: payload.garment_id, uid: payload.uid, replace: Boolean(payload.replace), name: ctx.lib.errorText(err, "").replace(/^That tag belongs to (.*?);.*$/, "$1") };
       ctx.render();
       return null;
     }
-    ctx.toast(err?.message || String(err), true);
+    ctx.toast(ctx.lib.errorText(err), true);
     return null;
   }
 }
