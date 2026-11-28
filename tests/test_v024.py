@@ -571,7 +571,7 @@ async def test_member_first_photo_auto_describes_own_garment_only(
             await http.post("/api/laundry_hub/photos", data=form(mine.id))
         ).status == 200
         await hass.async_block_till_done(wait_background_tasks=True)
-        assert ai.await_count == 1  # first photo on their own garment
+        assert ai.await_count == len(describe.GROUPS)  # first photo, own garment
         assert mine.description["summary"] == "A hoodie."
         # Runs under the integration's configured AI Task entity.
         assert ai.await_args.kwargs["entity_id"] == "ai_task.test"
@@ -579,7 +579,7 @@ async def test_member_first_photo_auto_describes_own_garment_only(
             await http.post("/api/laundry_hub/photos", data=form(mine.id))
         ).status == 200
         await hass.async_block_till_done(wait_background_tasks=True)
-        assert ai.await_count == 1  # second photo: no new call
+        assert ai.await_count == len(describe.GROUPS)  # second photo: no new call
 
     alex = (await connect(hass, hass_ws_client, tokens))["alex"]
     for type_, payload in (

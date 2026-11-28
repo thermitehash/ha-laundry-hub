@@ -368,9 +368,10 @@ def test_normalize_validates_against_taxonomy() -> None:
 
 
 def test_structure_and_attachments() -> None:
-    schema = describe.structure()
-    keys = {str(k) for k in schema.schema}
-    assert {"type", "subtype", "colors", "formality", "confidence", "summary"} <= keys
+    # v0.2.5: two groups, each with its own "unsure" list (no confidence object).
+    keys = {str(k) for g in describe.GROUPS for k in describe.structure(g).schema}
+    assert {"type", "subtype", "colors", "formality", "unsure", "summary"} <= keys
+    assert "confidence" not in keys
     assert len(describe.attachments([f"p{i}.jpg" for i in range(5)], "g1")) == 3
     assert describe.attachments([], "g1") == []
     assert (
@@ -545,10 +546,10 @@ async def test_auto_describe_after_first_photo(hass: HomeAssistant, caplog) -> N
     with patch.object(describe, "_generate_data", mock):
         await hub.wardrobe.async_add_photo(garment, jpeg())
         await hass.async_block_till_done()
-        assert mock.await_count == 1
+        assert mock.await_count == len(describe.GROUPS)  # one call per group
         await hub.wardrobe.async_add_photo(garment, jpeg())  # second photo: no new call
         await hass.async_block_till_done()
-        assert mock.await_count == 1
+        assert mock.await_count == len(describe.GROUPS)
     assert garment.description["summary"] == "A top."
     other = hub.enroll(uid="55667788", name="Other")
     with patch.object(
@@ -848,7 +849,7 @@ async def test_auto_describe_after_url_import_adds_first_photo(
     with patch.object(describe, "_generate_data", mock):
         await hub.wardrobe.async_apply_import(garment, preview["token"])
         await hass.async_block_till_done()
-    assert mock.await_count == 1
+    assert mock.await_count == len(describe.GROUPS)
     # The import's details reach the AI as context, and the brand stays locked.
     assert "Old Navy" in mock.await_args.kwargs["instructions"]
     assert garment.description["summary"] == "A knit."

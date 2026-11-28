@@ -467,7 +467,8 @@ def test_validate_drops_invented_links_and_non_apparel() -> None:
     with pytest.raises(TypeError):
         validate("nope", "", clothing_only=True)
     assert "EMAIL TEXT" in extract.instructions("Shop", "body")
-    assert "items" in str(extract.structure().schema)
+    assert "items" in str(extract.order_structure().schema)
+    assert "Tee" in extract.detail_instructions("Shop", "body", ["Tee"])
 
 
 def test_store_migration_3_1_to_3_2_is_lossless() -> None:

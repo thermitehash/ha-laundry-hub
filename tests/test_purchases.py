@@ -277,7 +277,9 @@ async def test_check_builds_cards_read_only_and_opt_in_only(
 
     # De-duplication: a second check finds nothing new and asks the AI nothing.
     calls = ai.await_count
-    assert calls == 4  # amazon, old navy, target, shipping update
+    # amazon, old navy, target, shipping update; v0.2.5: two passes each
+    # (order and names, then item details).
+    assert calls == 8
     again = await hub.purchases.async_check(manual=True)
     assert again["new_cards"] == 0 and ai.await_count == calls
 
@@ -359,7 +361,7 @@ async def test_backfill_none_only_reads_new_mail(
     assert not any(c[0] == "UID SEARCH" for c in fake.commands)
     fake.messages[6] = load("target_mixed.eml").replace(b"<tgt-1@", b"<tgt-2@")
     summary = await hub.purchases.async_check(manual=True)
-    assert summary["new_cards"] == 1 and ai.await_count == 1
+    assert summary["new_cards"] == 1 and ai.await_count == 2  # two passes
 
 
 async def test_ai_failure_retries_from_that_message(

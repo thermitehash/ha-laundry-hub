@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "laundry_hub"
 NAME: Final = "Laundry Hub"
-VERSION: Final = "0.2.4"
+VERSION: Final = "0.2.5"
 
 # Event fired by the tap stations (ESPHome `homeassistant.event`).
 TAP_EVENT: Final = "esphome.laundry_tap"
@@ -153,3 +153,18 @@ MAX_NAME_LEN: Final = 100
 MAX_NOTES_LEN: Final = 1000
 UID_MIN_HEX: Final = 8  # 4-byte UID
 UID_MAX_HEX: Final = 20  # 10-byte UID
+
+# Complexity budget for every structure sent to ai_task.generate_data (v0.2.5).
+# Anthropic compiles a structure into a grammar and rejects big ones with
+# "400 Schema is too complex". Its documented limits are 24 optional and 16
+# union-typed parameters per request, plus an unpublished grammar-size limit
+# that nested optional fields hit first. This budget is our own, deliberately
+# well below that, measured on the JSON schema Home Assistant sends
+# (see ai_schema.complexity). tests/test_ai_schema.py checks every structure.
+AI_STRUCTURE_BUDGET: Final = {
+    "properties": 12,  # named fields at every level, nested ones included
+    "optional": 0,  # every field is required; empty answers are cleaned locally
+    "unions": 0,  # anyOf / type lists
+    "depth": 2,  # object levels: an order with a list of item objects is 2
+    "enum_values": 150,  # select options across the whole structure
+}

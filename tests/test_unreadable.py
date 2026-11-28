@@ -11,7 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 import pytest
 
-from custom_components.laundry_hub import extract, importer, mailbox
+from custom_components.laundry_hub import ai_schema, extract, importer, mailbox
 
 from .fake_imap import FakeImap, load
 from .test_purchases import PASSWORD, setup_hub
@@ -122,7 +122,7 @@ async def test_failing_email_never_blocks_and_is_marked_unreadable(
         ]
         assert len([c for c in calls if "on its way" in c["instructions"]]) == 2
         minimal = calls[1]["structure"]
-        assert "unit_price" not in str(minimal.schema)
+        assert "unit_price" not in str(ai_schema.json_schema(minimal))
         assert next(iter(inbox.meta["failures"].values()))["count"] == 1
         assert "attempt 1 of 3" in caplog.text
         # The redacted exception text is logged, never the address.
@@ -214,12 +214,14 @@ async def test_minimal_structure_retry_rescues_an_email(hass: HomeAssistant) -> 
     server = mailbox_of("or_order.eml")
     replies = [
         HomeAssistantError("response_not_found"),
+        # v0.2.5: the smaller pass-1 structure lists names as plain strings,
         SimpleNamespace(
-            data={
-                "is_order": True,
-                "order_ref": "OR-5521",
-                "items": [{"name": "Ferrosi Pants"}],
-            },
+            data={"is_order": True, "order_ref": "OR-5521", "items": ["Ferrosi Pants"]},
+            conversation_id="c",
+        ),
+        # then pass 2 reads the item's details.
+        SimpleNamespace(
+            data={"items": [{"name": "Ferrosi Pants", "is_apparel": True}]},
             conversation_id="c",
         ),
     ]
@@ -267,12 +269,10 @@ def test_loose_values_still_make_a_card() -> None:
     assert (socks.unit_price, socks.quantity) == (1234.5, 2)
     assert (hat.unit_price, hat.quantity) == (7.0, 3)
     assert extract.validate({"items": []}, "", clothing_only=True).items == []
-    # The structure itself requires nothing and takes prices as text.
-    schema = extract.structure()
-    assert schema({}) == {}
-    assert schema({"items": [{"unit_price": "$12.99"}]}) == {
-        "items": [{"unit_price": "$12.99"}]
-    }
-    assert extract.minimal_structure()({"items": [{"name": "x"}]}) == {
-        "items": [{"name": "x"}]
-    }
+    # v0.2.5: structures require every key (empty text is fine, and providers
+    # don't validate answers) and take prices as text.
+    row = dict.fromkeys(
+        ("name", "is_apparel", "quantity", "colour", "size", "cut", "product_url"), ""
+    )
+    row.update(unit_price="$12.99", is_apparel=True)
+    assert extract.item_structure()({"items": [row]}) == {"items": [row]}
