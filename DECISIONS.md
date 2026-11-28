@@ -19,6 +19,7 @@ Choices made while building v0.2.2 without asking. Each line: decision, then rea
 15. **Life is Best Outside is left out.** This session's network blocks the site and search finds no shop under that name, so apparel couldn't be confirmed. It can be added as a custom domain.
 16. **Senders Heather listed as subdomains (e5.llbean.com, mail.duluthtrading.com, orders.backcountry.com, nat.carhartt.com, info.meundies.com, web.blauer.com) are covered by subdomain matching** of the brand domain; tests check each one.
 17. **The CI job `ha-internals` checks the private media-source attribute against HA 2026.11.3 (blocking) and the dev branch (informational).** Both have it today.
+18. **Heather's answers to the v0.2.2 open questions (no code change):** Life is Best Outside is not added, and the catalog stays exactly as built (Blauer and First Tactical remain the only uniform suppliers; First Tactical remains the built-in Shopify entry). Partial shipments keep the current rule: non-apparel never creates a card. Restore doesn't unmatch cards. The uniform offer stays limited to Blauer and First Tactical.
 
 # Decisions (v0.2.1)
 
