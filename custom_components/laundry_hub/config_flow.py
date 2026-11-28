@@ -19,8 +19,10 @@ from homeassistant.helpers import selector
 from homeassistant.util import dt as dt_util
 import probatio as vol
 
+from .access import ACCESS_ADMINS, ACCESS_HOUSEHOLD, owner_for
 from .const import (
     CONF_AI_TASK_ENTITY,
+    CONF_APP_ACCESS,
     CONF_COLOR,
     CONF_DELETE,
     CONF_FEEDBACK_TIMEOUT,
@@ -40,6 +42,7 @@ from .const import (
     CONF_PURCHASE_SHOPIFY,
     CONF_PURCHASE_STORES,
     CONF_STATION_DEVICES,
+    CONF_USER_OWNERS,
     CONF_WARDROBE_ENABLED,
     DEFAULT_FEEDBACK_TIMEOUT,
     DEFAULT_FLASH_DURATION,
@@ -157,6 +160,17 @@ def settings_schema(defaults: dict[str, Any]) -> vol.Schema:
             CONF_FOLLOW_HA_THEME, default=bool(defaults.get(CONF_FOLLOW_HA_THEME))
         )
     ] = selector.BooleanSelector()
+    fields[
+        vol.Required(
+            CONF_APP_ACCESS, default=defaults.get(CONF_APP_ACCESS) or ACCESS_ADMINS
+        )
+    ] = selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=[ACCESS_ADMINS, ACCESS_HOUSEHOLD],
+            translation_key="app_access",
+            mode=selector.SelectSelectorMode.LIST,
+        )
+    )
     return vol.Schema(fields)
 
 
@@ -187,6 +201,11 @@ def validate_settings(
         CONF_WARDROBE_ENABLED: bool(user_input.get(CONF_WARDROBE_ENABLED, False)),
         CONF_AI_TASK_ENTITY: user_input.get(CONF_AI_TASK_ENTITY) or None,
         CONF_FOLLOW_HA_THEME: bool(user_input.get(CONF_FOLLOW_HA_THEME, False)),
+        CONF_APP_ACCESS: (
+            ACCESS_HOUSEHOLD
+            if user_input.get(CONF_APP_ACCESS) == ACCESS_HOUSEHOLD
+            else ACCESS_ADMINS
+        ),
     }
     ai_entity = user_input.get(CONF_AI_TASK_ENTITY) or None
     if ai_entity and hass.states.get(str(ai_entity)) is None:
@@ -358,6 +377,7 @@ class LaundryHubOptionsFlow(OptionsFlow):
         self._account: dict[str, Any] | None = None
         self._pending: dict[str, Any] = {}
         self._changing_password = False
+        self._pending_settings: dict[str, Any] = {}
 
     @property
     def _current(self) -> dict[str, Any]:
@@ -430,13 +450,64 @@ class LaundryHubOptionsFlow(OptionsFlow):
         if user_input is not None:
             options, errors = validate_settings(self.hass, user_input)
             if not errors:
-                return self.async_create_entry(
-                    data={**self._purchase_options(), **options}
-                )
+                options = {**self._purchase_options(), **options}
+                if CONF_USER_OWNERS in self.config_entry.options:
+                    options[CONF_USER_OWNERS] = self.config_entry.options[
+                        CONF_USER_OWNERS
+                    ]
+                if options[CONF_APP_ACCESS] == ACCESS_HOUSEHOLD:
+                    self._pending_settings = options
+                    return await self.async_step_app_people()
+                return self.async_create_entry(data=options)
         return self.async_show_form(
             step_id=step_id,
             data_schema=settings_schema(self._current),
             errors=errors,
+        )
+
+    async def _people(self) -> list[tuple[str, str, str]]:
+        """(field key, user id, user name) for every real HA user."""
+        users = [
+            u
+            for u in await self.hass.auth.async_get_users()
+            if not u.system_generated and u.is_active
+        ]
+        out: list[tuple[str, str, str]] = []
+        used: set[str] = set()
+        for user in sorted(users, key=lambda u: (u.name or "").lower()):
+            key = (user.name or "User").strip() or "User"
+            if key in used:
+                key = f"{key} ({user.id[:6]})"
+            used.add(key)
+            out.append((key, user.id, user.name or ""))
+        return out
+
+    async def async_step_app_people(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Household access: which Laundry Hub owner each HA user is."""
+        people = await self._people()
+        if user_input is not None:
+            mapping = {
+                user_id: str(user_input.get(key) or "") for key, user_id, _ in people
+            }
+            return self.async_create_entry(
+                data={**self._pending_settings, CONF_USER_OWNERS: mapping}
+            )
+        hub = self._hub
+        fields: dict[Any, Any] = {}
+        for key, user_id, _name in people:
+            current = owner_for(hub, user_id) if hub is not None else None
+            marker = (
+                vol.Optional(key, description={"suggested_value": current})
+                if current
+                else vol.Optional(key)
+            )
+            fields[marker] = selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="person")
+            )
+        return self.async_show_form(
+            step_id="app_people", data_schema=vol.Schema(fields)
         )
 
     def _purchase_options(self) -> dict[str, Any]:

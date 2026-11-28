@@ -366,7 +366,9 @@ async def test_subscribe(hass: HomeAssistant, ws, hub: LaundryHub) -> None:
     assert msg["success"]
     hub.enroll(uid="11223344", name="A")
     event = await ws.client.receive_json()
-    assert event["event"] == {"changed": True}
+    # v0.2.3 adds `rev` (additive); everything v0.2.2 sent is unchanged.
+    assert event["event"]["changed"] is True
+    assert isinstance(event["event"]["rev"], int)
 
 
 async def test_not_loaded(hass: HomeAssistant, entry, hass_ws_client) -> None:

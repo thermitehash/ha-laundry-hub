@@ -38,7 +38,7 @@ MAX_UNKNOWN_TAGS = 50
 _TOP_KEYS = frozenset(
     {
         "garments", "last_unknown", "unknown_tags", "quarantine", "owners",
-        "stations", "purchases", "purchase_meta",
+        "stations", "purchases", "purchase_meta", "revs",
     }
 )  # fmt: skip
 
@@ -174,6 +174,19 @@ def migrate_v3_1(old: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def migrate_v3_2(old: dict[str, Any]) -> dict[str, Any]:
+    """3.2 (v0.2.2) → 3.3 (v0.2.3): add change tracking; nothing else changes.
+
+    Revs are assigned to every existing record when the catalog loads (the
+    tracker fingerprints records as the hub sees them). A minor bump: v0.2.2
+    can still load the file and ignores ``revs``.
+    """
+    data = dict(old)
+    if not isinstance(data.get("revs"), dict):
+        data["revs"] = {"rev": 0, "floor": 0, "records": {}, "tombstones": {}}
+    return data
+
+
 # New v3 garment keys and their defaults ("reserved" = stored only, used in v0.3).
 V3_GARMENT_DEFAULTS: dict[str, Any] = {
     "brand": None,
@@ -214,7 +227,7 @@ class _CatalogStore(Store[dict[str, Any]]):
             data = migrate_v1(data)
         if old_major_version < 3:
             data = migrate_v2(data)
-        return migrate_v3_1(data)
+        return migrate_v3_2(migrate_v3_1(data))
 
     async def _async_backup(
         self, major: int, minor: int, old_data: dict[str, Any]
@@ -258,6 +271,7 @@ class Catalog:
         self.stations: dict[str, dict[str, Any]] = {}
         self.purchases: dict[str, dict[str, Any]] = {}
         self.purchase_meta: dict[str, Any] = {}
+        self.revs: dict[str, Any] = {}
         self.extra: dict[str, Any] = {}
 
     async def async_load(self) -> None:
@@ -303,6 +317,8 @@ class Catalog:
         }
         meta = data.get("purchase_meta")
         self.purchase_meta = meta if isinstance(meta, dict) else {}
+        revs = data.get("revs")
+        self.revs = revs if isinstance(revs, dict) else {}
         # Top-level keys written by a newer version are kept on save.
         self.extra = {k: v for k, v in data.items() if k not in _TOP_KEYS}
         for garment in self.garments.values():
@@ -324,6 +340,7 @@ class Catalog:
             "stations": self.stations,
             "purchases": self.purchases,
             "purchase_meta": self.purchase_meta,
+            "revs": self.revs,
         }
 
     def schedule_save(self) -> None:

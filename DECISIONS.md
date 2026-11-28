@@ -1,3 +1,25 @@
+# Decisions (v0.2.3)
+
+Choices made while building v0.2.3 without asking. Each line: decision, then reason.
+
+1. **Revs come from fingerprints, not from instrumenting each change.** After any change (and before every "changed" signal, `data` and `changes`), each record is hashed. A changed hash gets the next rev, and a vanished record gets a tombstone. No mutation path can forget to bump a rev, including taps, purchase checks and zone edits made in HA's own UI.
+2. **Revs live in the catalog store (`revs`, schema 3.3, a minor bump).** v0.2.2 can still load the file. If someone goes back and forth, the counter restarts, and the app's `since_rev` (now newer than the server's) triggers a `reset`.
+3. **Zones get revs too, although they live in config subentries.** A zone edit reloads the entry; the tracker sees the new fingerprint at setup.
+4. **`changes` resets when `since_rev` is older than the newest purged tombstone, or newer than the counter.** The first means the 30-day window has passed. The second means the store was restored or downgraded.
+5. **"missing" is part of a garment's fingerprint.** Missing is derived from time, and an offline app needs to learn that a garment went missing. The hourly refresh bumps those garments' revs.
+6. **Conflicts are a normal websocket error with extra fields (`kind`, `record_id`, `current`).** HA's `send_error` can't carry a record, so the result message is built by hand in HA's error format.
+7. **`if_rev` maps to the record named in the message (`garment_id`, `card_id`, `zone_id`, `uid`); bulk commands take `if_revs`.** One rule for every command, with no per-command code.
+8. **Policies are declared per command in one table (`access.Policy`), enforced by one wrapper.** A test fails if a command has no policy.
+9. **Members may edit name and notes (`garment/update`), size and wear_for (`garment/wardrobe`), description fields, and photos.** That's the prompt's list. Brand, purchase details, owner, bins, tags, location and AI describe stay admin-only. AI describe calls a paid provider.
+10. **A member's owner defaults to the person linked to their HA user.** The options mapping overrides it, and an empty value means no owner. Most households already link people to users, so household access works without typing.
+11. **"App access" sits on the main settings form, and "Household" opens a people step.** This works whether Wardrobe is on or off, without changing the Wardrobe-off flow.
+12. **Members never see unknown tags or unmatched purchase cards.** Neither has an owner, and both are household admin work. Members see cards matched to their own garments (`purchases.mine`).
+13. **For members, `changes` reports other owners' changed garments as `deleted`.** If a garment moves to another owner, the member's app must drop it. The cost is that a member learns the ids (not the contents) of other garments that changed.
+14. **Phone taps reuse the station state machine by acting as a station.** `put_away:<closet>` acts as that closet, `in_wash` as the laundry station in sort mode, and `drying` as the laundry station in dry mode. Recent taps and the tap event show `phone:<device>`. Phones don't count towards station health or send LED feedback.
+15. **`available_actions` offers the garment's own bin and dry type, not every bin.** The state machine always uses the garment's own zones; moving to another bin is a reassignment (admin).
+16. **The photo view now checks who's asking (fix).** v0.2.2 served a garment photo to any logged-in HA user who knew its filename. Now only admins, and members for their own garments, get it. The import-preview view is admin-only.
+17. **The v0.2.2 test suite runs unchanged except one assertion.** `subscribe`'s "changed" event now carries `rev`, as the prompt requires, so the exact-equality check became "changed is true and rev is an integer". A new test also replays every command the panel calls, as an admin.
+
 # Decisions (v0.2.2)
 
 Choices made while building v0.2.2 without asking. Each line: decision, then reason.

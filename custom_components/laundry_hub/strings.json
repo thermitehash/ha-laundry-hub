@@ -14,7 +14,8 @@
           "notify_target": "Notify target for enrollment prompts",
           "wardrobe_enabled": "Wardrobe catalog",
           "ai_task_entity": "AI Task entity for descriptions",
-          "follow_ha_theme": "Follow HA theme colour"
+          "follow_ha_theme": "Follow HA theme colour",
+          "app_access": "App access"
         },
         "data_description": {
           "laundry_device": "ESPHome device of the laundry room tap station (optional until the hardware is flashed).",
@@ -26,7 +27,8 @@
           "notify_target": "A notify entity (notify.xyz) or a notify action such as mobile_app_my_phone.",
           "wardrobe_enabled": "Adds purchase details, photos and AI descriptions per garment. When describing, photos and descriptions are sent to the chosen AI provider.",
           "ai_task_entity": "Optional. Used to describe garments from their photos.",
-          "follow_ha_theme": "Use your Home Assistant theme's primary colour instead of Laundry Hub's teal."
+          "follow_ha_theme": "Use your Home Assistant theme's primary colour instead of Laundry Hub's teal.",
+          "app_access": "Admins only (default) or the whole household. Members only see their own garments."
         }
       }
     },
@@ -53,7 +55,8 @@
           "notify_target": "Notify target for enrollment prompts",
           "wardrobe_enabled": "Wardrobe catalog",
           "ai_task_entity": "AI Task entity for descriptions",
-          "follow_ha_theme": "Follow HA theme colour"
+          "follow_ha_theme": "Follow HA theme colour",
+          "app_access": "App access"
         },
         "data_description": {
           "laundry_device": "ESPHome device of the laundry room tap station (optional until the hardware is flashed).",
@@ -65,7 +68,8 @@
           "notify_target": "A notify entity (notify.xyz) or a notify action such as mobile_app_my_phone.",
           "wardrobe_enabled": "Adds purchase details, photos and AI descriptions per garment. When describing, photos and descriptions are sent to the chosen AI provider.",
           "ai_task_entity": "Optional. Used to describe garments from their photos.",
-          "follow_ha_theme": "Use your Home Assistant theme's primary colour instead of Laundry Hub's teal."
+          "follow_ha_theme": "Use your Home Assistant theme's primary colour instead of Laundry Hub's teal.",
+          "app_access": "Who may use Laundry Hub from the iPhone app (and the API). Admins only keeps today's behaviour. Household also lets other HA users see and tap their own garments; you choose who is who next."
         },
         "menu_options": {
           "settings": "Main settings",
@@ -92,7 +96,8 @@
           "notify_target": "Notify target for enrollment prompts",
           "wardrobe_enabled": "Wardrobe catalog",
           "ai_task_entity": "AI Task entity for descriptions",
-          "follow_ha_theme": "Follow HA theme colour"
+          "follow_ha_theme": "Follow HA theme colour",
+          "app_access": "App access"
         },
         "data_description": {
           "laundry_device": "ESPHome device of the laundry room tap station (optional until the hardware is flashed).",
@@ -104,7 +109,8 @@
           "notify_target": "A notify entity (notify.xyz) or a notify action such as mobile_app_my_phone.",
           "wardrobe_enabled": "Adds purchase details, photos and AI descriptions per garment. When describing, photos and descriptions are sent to the chosen AI provider.",
           "ai_task_entity": "Optional. Used to describe garments from their photos.",
-          "follow_ha_theme": "Use your Home Assistant theme's primary colour instead of Laundry Hub's teal."
+          "follow_ha_theme": "Use your Home Assistant theme's primary colour instead of Laundry Hub's teal.",
+          "app_access": "Who may use Laundry Hub from the iPhone app (and the API). Admins only keeps today's behaviour. Household also lets other HA users see and tap their own garments; you choose who is who next."
         }
       },
       "email_account": {
@@ -165,6 +171,10 @@
         "data": {
           "cards": "Existing purchase cards"
         }
+      },
+      "app_people": {
+        "title": "App access: people",
+        "description": "Choose which person each Home Assistant user is. Members see, tap and edit only that person's garments. Leave a user empty to give them no garments. A user linked to a person in Settings → People starts with that person."
       }
     },
     "error": {
@@ -458,6 +468,12 @@
     },
     "not_uniform_supplier": {
       "message": "That store isn't a uniform supplier."
+    },
+    "tag_not_enrolled": {
+      "message": "That tag isn't on a garment yet."
+    },
+    "invalid_action": {
+      "message": "{action} isn't possible for this garment."
     }
   },
   "issues": {
@@ -707,6 +723,12 @@
       "options": {
         "keep": "Keep them",
         "delete": "Delete them"
+      }
+    },
+    "app_access": {
+      "options": {
+        "admins": "Admins only",
+        "household": "Household (members see their own garments)"
       }
     }
   }

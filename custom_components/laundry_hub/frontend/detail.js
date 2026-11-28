@@ -143,7 +143,7 @@ export function render(ctx) {
       ${state.editing === "basics" ? basicsForm(ctx, g) : ""}
       ${ctx.wardrobe ? wardrobeSection(ctx, g) : photosOff}
       ${g.notes && state.editing !== "basics" ? `<div class="card"><span class="sub">Notes</span><p style="margin:4px 0 0">${lib.esc(g.notes)}</p></div>` : ""}
-      <div class="card"><strong>Recent taps</strong>${taps.length ? `<ul class="events">${taps.map((t) => `<li><span>${lib.esc(EVENT_LABEL[t.event] || t.event)}${t.repeat ? " (again)" : ""} · ${lib.esc(lib.STATION_LABEL[t.station] || t.station)}</span><span class="sub">${lib.esc(lib.timeAgo(t.time))}</span></li>`).join("")}</ul>`
+      <div class="card"><strong>Recent taps</strong>${taps.length ? `<ul class="events">${taps.map((t) => `<li><span>${lib.esc(EVENT_LABEL[t.event] || t.event)}${t.repeat ? " (again)" : ""} · ${lib.esc(lib.stationLabel(t.station))}</span><span class="sub">${lib.esc(lib.timeAgo(t.time))}</span></li>`).join("")}</ul>`
         : `<p class="hint" style="margin:6px 0 0">No taps yet.</p>`}</div>
     </div></div>`;
 }

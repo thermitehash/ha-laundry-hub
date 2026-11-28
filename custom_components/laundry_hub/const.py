@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "laundry_hub"
 NAME: Final = "Laundry Hub"
-VERSION: Final = "0.2.2"
+VERSION: Final = "0.2.3"
 
 # Event fired by the tap stations (ESPHome `homeassistant.event`).
 TAP_EVENT: Final = "esphome.laundry_tap"
@@ -36,6 +36,11 @@ CONF_AI_TASK_ENTITY: Final = "ai_task_entity"
 CONF_FOLLOW_HA_THEME: Final = "follow_ha_theme"
 
 # Purchase emails (v0.2.1). Credentials live in entry.data, settings in options.
+# App access (v0.2.3).
+CONF_APP_ACCESS: Final = "app_access"  # "admins" (default) or "household"
+CONF_USER_OWNERS: Final = "user_owners"  # {ha_user_id: person entity id or ""}
+API_VERSION: Final = 1  # adding fields never bumps it; removing/renaming does
+
 CONF_PURCHASE_EMAIL: Final = "purchase_email"
 CONF_PURCHASE_STORES: Final = "purchase_stores"
 CONF_PURCHASE_CUSTOM: Final = "purchase_custom_domains"
@@ -105,7 +110,7 @@ REPEAT_WINDOW: Final = timedelta(minutes=5)
 # Storage.
 STORAGE_KEY: Final = DOMAIN
 STORAGE_VERSION: Final = 3
-STORAGE_MINOR_VERSION: Final = 2  # 3.2 adds purchases (lossless, no backup needed)
+STORAGE_MINOR_VERSION: Final = 3  # 3.2 purchases, 3.3 revs (lossless, minor bumps)
 STORAGE_SAVE_DELAY: Final = 5  # seconds (debounced writes)
 
 PHOTO_DIR: Final = "laundry_hub/photos"
