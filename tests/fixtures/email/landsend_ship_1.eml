@@ -1,0 +1,24 @@
+From: Lands' End <landsend@landsend.narvar.com>
+To: shopper@example.com
+Subject: Your Lands' End order has shipped
+Date: Fri, 20 Nov 2026 15:00:00 +0000
+Message-ID: <le-2@landsend.narvar.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============1551136856329490916=="
+
+--===============1551136856329490916==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Plain text version.
+
+--===============1551136856329490916==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Shipment 1 of 2 for order LE-7781 is on its way.</p><p>Women's=
+ Cotton Rib Turtleneck, Navy, M</p></body></html>
+
+--===============1551136856329490916==--

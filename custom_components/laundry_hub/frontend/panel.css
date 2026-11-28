@@ -212,3 +212,4 @@ button.pcard:focus-visible, button.pcard[aria-pressed="true"] { border-color: va
 .inbox-item .pcard { padding: 0; }
 .origin { display: flex; gap: 8px; align-items: center; color: var(--hub-text-muted); font-size: var(--hub-text-sm); }
 .pick-row { display: flex; align-items: center; gap: var(--hub-space-2); min-height: var(--hub-touch); padding: 6px 8px; border-radius: var(--hub-radius-control); border: 1px solid var(--app-border); background: var(--hub-card); color: inherit; cursor: pointer; }
+.offer { align-items: center; gap: var(--hub-space-2); border: 1px solid var(--app-accent-tint); }

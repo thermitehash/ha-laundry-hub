@@ -76,7 +76,7 @@ function orderBanner(ctx) {
   const { lib, data, state } = ctx;
   const card = (data.purchases?.cards || []).find((c) => c.id === state.add.card);
   if (!card) return "";
-  return `<div class="card row origin">${lib.ICON.sparkle}<span style="flex:1">From your ${lib.esc(card.store)} order${card.order_date ? `, ${lib.esc(lib.shortDate(card.order_date))}` : ""}</span>
+  return `<div class="card row origin">${lib.ICON.sparkle}<span style="flex:1">From your ${lib.esc(card.store)} order${card.order_date ? `, ${lib.esc(lib.shortDate(card.order_date))}` : ""}${card.uniform_supplier ? " · Uniform will be ticked (you can untick it)" : ""}</span>
     <button type="button" class="link" data-act="changeOrder">Change</button></div>`;
 }
 

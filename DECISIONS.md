@@ -1,3 +1,26 @@
+# Decisions (v0.2.2)
+
+Choices made while building v0.2.2 without asking. Each line: decision, then reason.
+
+1. **IMAP debug logging stays muted during mail sessions** (Heather's answer). Privacy over debug output.
+2. **The Add flow keeps ranking cards by date only** (Heather's answer).
+3. **A partial-shipment card needs `is_apparel` true or missing, even with "Clothing only" off.** That's the rule asked for; "Clothing only" still governs new orders.
+4. **The "one card, slightly renamed item" merge only applies when the email lists exactly one item.** Otherwise a partial shipment's new item would wrongly merge into the order's only card.
+5. **Cards now store the email's image link (`image_url`)** so Restore can re-fetch a deleted photo. Cards from v0.2.1 don't have it and come back without a photo. The link is never sent to the panel.
+6. **Restore also lifts a "Not clothing" rule for that product**, since restoring says it is clothing after all.
+7. **Auto-archive counts from the last status change, not from creation.** Otherwise a restored old card would be archived again at the next check.
+8. **Uniform preset sets `wear_for` to work too**, matching v0.2's rule that a uniform is a work garment. Unticking in the details form undoes both.
+9. **The uniform offer is once per store: accepting or "No thanks" both record the store.** It counts matched garments not marked uniform, which covers matches made before v0.2.2 and presets the user unticked.
+10. **No store schema change.** New card keys (`image_url`) and meta keys (`uniform_offers_done`) fit the existing 3.2 dicts.
+11. **Narvar and Shopify can't be added as custom sender domains** (`narvar.com`, `narvarnotify.com`, `shopifyemail.com` are refused, and ignored if already stored). Either would opt in to thousands of brands.
+12. **Shopify shop names match as whole words, case-insensitively, in the From display name or the Subject** (as asked). The body is never used for matching.
+13. **Shopify store counts in Step B read headers (never bodies).** Gmail's name search also matches body text, so UID counts alone would overcount other shops.
+14. **User-added Shopify names get the key `shopify:<name>`** and aren't uniform suppliers. Only the built-in First Tactical entry is.
+15. **Life is Best Outside is left out.** This session's network blocks the site and search finds no shop under that name, so apparel couldn't be confirmed. It can be added as a custom domain.
+16. **Senders Heather listed as subdomains (e5.llbean.com, mail.duluthtrading.com, orders.backcountry.com, nat.carhartt.com, info.meundies.com, web.blauer.com) are covered by subdomain matching** of the brand domain; tests check each one.
+17. **The CI job `ha-internals` checks the private media-source attribute against HA 2026.11.3 (blocking) and the dev branch (informational).** Both have it today.
+18. **Heather's answers to the v0.2.2 open questions (no code change):** Life is Best Outside is not added, and the catalog stays exactly as built (Blauer and First Tactical remain the only uniform suppliers; First Tactical remains the built-in Shopify entry). Partial shipments keep the current rule: non-apparel never creates a card. Restore doesn't unmatch cards. The uniform offer stays limited to Blauer and First Tactical.
+
 # Decisions (v0.2.1)
 
 Choices made while building v0.2.1 without asking. Each line: decision, then reason.

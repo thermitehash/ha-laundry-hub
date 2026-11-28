@@ -1,0 +1,24 @@
+From: Cozy Candle Co <store@t.shopifyemail.com>
+To: shopper@example.com
+Subject: Order #2001 confirmed
+Date: Sun, 22 Nov 2026 15:00:00 +0000
+Message-ID: <cc-1@shopifyemail.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============7628980584253961956=="
+
+--===============7628980584253961956==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Plain text version.
+
+--===============7628980584253961956==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>SECRET-SHOPIFY-BODY Thank you for your order. Ships like First=
+ Tactical gear.</p></body></html>
+
+--===============7628980584253961956==--

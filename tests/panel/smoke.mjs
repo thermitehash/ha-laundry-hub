@@ -75,8 +75,14 @@ function data(wardrobe) {
       connected: true, provider: "gmail", stores: 3, last_check: iso(12), last_error: null, new_cards: 2,
       cards: [
         { id: "p1", status: "new", store: "Old Navy", store_key: "old_navy", order_ref: "ON-1", order_date: "2026-11-22", currency: "USD", name: `High-Waisted Wow Jeans ${XSS}`, brand: "Old Navy", color: "Black", size: "8 Tall", quantity: 1, unit_price: 44.99, product_url: "https://oldnavy.example/p", photos: ["purchase-p1-a.jpg"], photo_urls: [{ name: "purchase-p1-a.jpg", full: PIXEL, thumb: PIXEL }], garment_id: null, created: iso(60), updated: iso(60), status_changed: iso(60) },
+        { id: "p3", status: "new", store: "Blauer", store_key: "blauer", uniform_supplier: true, order_ref: "B-1", order_date: "2026-11-21", currency: "USD", name: "8703 Long Sleeve Shirt", brand: "Blauer", color: "French Blue", size: "L", quantity: 1, unit_price: 64, product_url: null, photos: [], photo_urls: [], garment_id: null, created: iso(100), updated: iso(100), status_changed: iso(100) },
         { id: "p2", status: "new", store: "Target", store_key: "target", order_ref: "T-9", order_date: "2026-11-20", currency: "USD", name: "Short Sleeve T-Shirt with a rather long product name that wraps", brand: null, color: "White", size: "XS", quantity: 1, unit_price: 8, product_url: null, photos: [], photo_urls: [], garment_id: null, created: iso(90), updated: iso(90), status_changed: iso(90) },
       ],
+      archived: [
+        { id: "a1", status: "dismissed", store: "Lands' End", store_key: "lands_end", uniform_supplier: false, order_ref: "LE-1", order_date: "2026-11-10", currency: "USD", name: "Cashmere Scarf", brand: null, color: "Red", size: null, quantity: 1, unit_price: 59.95, product_url: null, photos: [], photo_urls: [], garment_id: null, created: iso(9000), updated: iso(9000), status_changed: iso(30) },
+        { id: "a2", status: "archived", store: "Orvis", store_key: "orvis", uniform_supplier: false, order_ref: "O-1", order_date: "2026-09-01", currency: "USD", name: "Flannel Shirt", brand: null, color: null, size: "M", quantity: 1, unit_price: 79, product_url: null, photos: [], photo_urls: [], garment_id: null, created: iso(90000), updated: iso(90000), status_changed: iso(3000) },
+      ],
+      uniform_offers: [{ store_key: "blauer", store: "Blauer", count: 2 }],
     } : null,
   };
 }
@@ -190,6 +196,20 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   if (!t.includes("Match to garment") || !t.includes("Not clothing") || !t.includes("Checked 12 min ago")) fail(`${tag}: purchases inbox`);
   await noHScroll(page, `${tag} purchases`);
   await shot(page, `${tag}-purchases`);
+  if (!t.includes("Mark all matched garments from Blauer as uniform")) fail(`${tag}: uniform offer missing`);
+  await click(page, '[data-act="markUniform"][data-store="blauer"]'); await settle(page);
+  const mu = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/purchases/uniform").pop());
+  if (!mu || mu.store_key !== "blauer" || mu.accept !== true) fail(`${tag}: uniform call ${JSON.stringify(mu)}`);
+  await click(page, '[data-act="purchasesView"][data-view="archived"]'); await settle(page);
+  t = await text(page);
+  if (!t.includes("Cashmere Scarf") || !t.includes("Restore") || t.includes("Match to garment")) fail(`${tag}: archived view`);
+  const order = await sr(page, "return [...root.querySelectorAll('.inbox .pcard .name')].map(e=>e.textContent).join('|')");
+  if (order !== "Cashmere Scarf|Flannel Shirt") fail(`${tag}: archived order ${order}`);
+  await shot(page, `${tag}-archived`);
+  await click(page, '[data-act="restorePurchase"][data-card="a1"]'); await settle(page);
+  const rs = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/purchases/restore").pop());
+  if (!rs || rs.card_id !== "a1") fail(`${tag}: restore call`);
+  await click(page, '[data-act="purchasesView"][data-view="new"]'); await settle(page);
   await click(page, '[data-act="openSheet"][data-kind="matchPurchase"][data-field="p2"]'); await settle(page);
   await sr(page, "const i = root.querySelector('input[data-input=matchSearch]'); i.value = 'button'; i.dispatchEvent(new Event('input', {bubbles:true}));"); await settle(page);
   const rows = await sr(page, "return [...root.querySelectorAll('[data-act=matchPurchase]')].map(e=>e.dataset.id).join(',')");
@@ -247,6 +267,8 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   await click(page, '[data-act="tab"][data-tab="settings"]'); await settle(page);
   t = await text(page);
   for (const s of ["Stations", "Online", "Offline", "Not set up", "Wardrobe catalog"]) if (!t.includes(s)) fail(`${tag} settings: missing "${s}"`);
+  const pe = await sr(page, "return root.querySelector('[data-section=purchase-emails]')?.textContent || ''");
+  for (const s of ["Connected", "Stores", "3", "Last check", "12 min ago", "New cards", "Last problem", "None", "Change in Configure"]) if (!pe.includes(s)) fail(`${tag} settings: purchase row missing "${s}"`);
   await noHScroll(page, `${tag} settings`);
   await shot(page, `${tag}-settings`);
 

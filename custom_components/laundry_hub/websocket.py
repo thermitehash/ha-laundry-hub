@@ -97,7 +97,8 @@ async def ws_data(
             {"name": name, "full": sign(name), "thumb": sign(thumb_name(name))}
             for name in garment.get("photos", [])
         ]
-    for card in (data.get("purchases") or {}).get("cards", []):
+    purchases = data.get("purchases") or {}
+    for card in [*purchases.get("cards", []), *purchases.get("archived", [])]:
         _sign_card(card, sign)
     return data
 
@@ -186,6 +187,44 @@ async def ws_purchases_dismiss(
         msg["card_id"], not_clothing=msg["not_clothing"]
     )
     return hub.purchases.view(card)
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/purchases/restore", vol.Required("card_id"): _str}
+)
+@websocket_api.async_response
+@_with_hub
+async def ws_purchases_restore(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Move a dismissed or archived card back to the inbox."""
+    card = await hub.purchases.async_restore(msg["card_id"])
+    return _sign_card(hub.purchases.view(card), _signer(hass, connection))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/purchases/uniform",
+        vol.Required("store_key"): _str,
+        vol.Optional("accept", default=True): bool,
+    }
+)
+@websocket_api.async_response
+@_with_hub
+async def ws_purchases_uniform(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Mark a uniform supplier's matched garments as uniform (or decline)."""
+    count = hub.purchases.mark_store_uniform(msg["store_key"], accept=msg["accept"])
+    return {"updated": count}
 
 
 @websocket_api.require_admin
@@ -762,5 +801,7 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_purchases_match,
         ws_purchases_dismiss,
         ws_purchases_check,
+        ws_purchases_restore,
+        ws_purchases_uniform,
     ):
         websocket_api.async_register_command(hass, handler)

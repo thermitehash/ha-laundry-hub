@@ -109,7 +109,6 @@ ANSWERS: dict[str, dict[str, Any]] = {
                 "image_url": "https://oldnavy.gap.com/webcontent/jeans-large.jpg",
                 "is_apparel": True,
             },
-            {"name": "A different item in the shipment", "is_apparel": True},
         ],
     },
     "target": {

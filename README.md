@@ -5,7 +5,7 @@ tracking and laundry sorting lights. Tap a tagged garment on a station and Laund
 works out where it goes next. The matching wash bin or dry zone lights up on a WLED strip,
 and the station's LED confirms the tap.
 
-> **Status: v0.2.1, unverified on hardware.** Everything is built and tested against fakes
+> **Status: v0.2.2, unverified on hardware.** Everything is built and tested against fakes
 > (see [`docs/build-report.md`](docs/build-report.md)). Stations, readers, tags and WLED
 > have not been tested on real hardware yet.
 
@@ -130,8 +130,16 @@ product link, photo) that you can match to garments. Needs Wardrobe on and an AI
 2. **Pick your stores.** Nothing is pre-selected. Each store shows how many matching emails
    arrived in the last 90 days, and stores with emails are listed first. Add any other
    store's sender domain under *Custom sender domains* (subdomains match too). The built-in
-   list (Amazon, Target, Walmart, Kohl's, Gap Inc. brands, Nordstrom, Macy's, H&M, Zara,
-   Uniqlo, Lululemon, Nike and more, 37 in all) is best effort.
+   list is best effort: Amazon, Target, Walmart, Kohl's, Gap Inc. brands, Nordstrom, Macy's,
+   H&M, Zara, Uniqlo, Lululemon, Nike and more, plus Lands' End, American Tall, L.L.Bean,
+   Duluth Trading, Eddie Bauer, Outdoor Research, Backcountry, Columbia, Carhartt,
+   Coldwater Creek, Brooks Brothers, Orvis, Darn Tough, Woolx, Outway, MeUndies,
+   Underoutfit, Truekind, Cinderella Shoes, Blauer and First Tactical.
+   - **Narvar** shipping emails are matched only on each brand's own subdomain (for example
+     `landsend.narvar.com`); `narvar.com` itself is never matched and can't be added.
+   - **Shopify stores by name:** shops on Shopify all send from `shopifyemail.com`, so add
+     them by name (comma-separated). An email counts only if the name appears as whole words
+     in the sender's name or the subject. First Tactical is built in.
 3. **Options:** check every N minutes (default 30, at least 15), how far back the first check
    looks (none, 30, **90** or 365 days), clothing only (default on: an Amazon order for
    batteries is skipped), and archive unmatched cards after N days (default 60).
@@ -149,7 +157,15 @@ deletes the stored address and password and asks whether to keep or delete exist
   *Dismiss*, and *Not clothing* (dismisses it and remembers that product for that store).
 - **Garment detail:** a matched garment shows "From your Old Navy order, Nov 22" with a link
   to the product.
-- Shipping and delivery emails for an order you already have update its card.
+- Shipping and delivery emails for an order you already have update its card. If one lists a
+  clothing item that isn't on a card yet (a partial shipment), it gets its own card.
+- **Archived** (in Purchases) lists dismissed and auto-archived cards, newest first. **Restore**
+  puts one back; its photo is downloaded again if the email had one.
+- **Uniform suppliers** (Blauer, First Tactical): garments matched to their orders start with
+  *Uniform* ticked (you can untick it). Purchases offers once per store to mark garments you
+  already matched from them as uniform.
+- **Settings** shows a read-only *Purchase emails* row (connected, stores, last check, new
+  cards, last problem) with a link to Configure.
 
 > **Privacy:** Laundry Hub only reads mail, and only from the stores you opt in to. It opens
 > the folder read-only and never sends, deletes, moves or flags messages. It reads the

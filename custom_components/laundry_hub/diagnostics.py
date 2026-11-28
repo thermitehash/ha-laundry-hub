@@ -11,6 +11,7 @@ from .const import (
     CONF_NOTIFY_TARGET,
     CONF_PURCHASE_CUSTOM,
     CONF_PURCHASE_EMAIL,
+    CONF_PURCHASE_SHOPIFY,
     CONF_STATION_DEVICES,
 )
 
@@ -22,6 +23,7 @@ TO_REDACT_OPTIONS = {
     CONF_STATION_DEVICES,
     CONF_PURCHASE_CUSTOM,
     CONF_PURCHASE_EMAIL,
+    CONF_PURCHASE_SHOPIFY,
 }
 TO_REDACT_GARMENT = {
     "name", "owner", "notes", "photo", "photos", "uids", "purchase", "brand_size_note",
@@ -87,6 +89,7 @@ def _purchases(hub: Any) -> dict[str, Any]:
         "active": inbox.active,
         "stores": sorted(inbox.opted.store_keys),
         "custom_domain_count": len(inbox.opted.custom_domains),
+        "shopify_name_count": len(inbox.opted.shopify_names),
         "cards": counts,
         "folders_tracked": len(meta.get("folders") or {}),
         "seen_messages": len(meta.get("seen_ids") or []),

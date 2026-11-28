@@ -147,22 +147,43 @@ export function filtered(ctx) {
   return ctx.data.garments.filter((g) => matches(ctx, g, ctx.state.filters)).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// The purchase inbox (Purchases chip): match, dismiss or "not clothing".
-function purchasesInbox(ctx) {
+// The purchase inbox (Purchases chip): match, dismiss or "not clothing";
+// "Archived" shows dismissed and auto-archived cards with Restore.
+function uniformOffers(ctx) {
   const { lib, data } = ctx;
+  return (data.purchases?.uniform_offers || []).map((o) => `<div class="card row wrap offer">
+      <span style="flex:1">${lib.esc(o.count)} matched garment${o.count === 1 ? "" : "s"} from ${lib.esc(o.store)} ${o.count === 1 ? "isn't" : "aren't"} marked as uniform.</span>
+      <button type="button" class="btn primary" data-act="markUniform" data-store="${lib.esc(o.store_key)}">Mark all matched garments from ${lib.esc(o.store)} as uniform</button>
+      <button type="button" class="btn" data-act="declineUniform" data-store="${lib.esc(o.store_key)}">No thanks</button></div>`).join("");
+}
+
+function purchasesInbox(ctx) {
+  const { lib, data, state } = ctx;
   const status = data.purchases || {};
-  const cards = lib.unmatchedCards(data);
+  const archivedView = Boolean(state.filters.archivedPurchases);
+  const archived = status.archived || [];
+  const cards = archivedView ? archived : lib.unmatchedCards(data);
   const line = status.connected
     ? `Checked ${lib.esc(lib.timeAgo(status.last_check))}${status.last_error ? ` · last problem: ${lib.esc(status.last_error)}` : ""}`
     : "Purchase emails aren't connected. Connect them in Laundry Hub → Configure → Purchase emails.";
-  const list = cards.length
-    ? `<div class="inbox">${cards.map((c) => `<div class="card inbox-item">${lib.purchaseCard(c)}
-        <div class="row wrap"><button type="button" class="btn primary" data-act="openSheet" data-kind="matchPurchase" data-field="${lib.esc(c.id)}">Match to garment</button>
-          <button type="button" class="btn" data-act="dismissPurchase" data-card="${lib.esc(c.id)}">Dismiss</button>
-          <button type="button" class="btn" data-act="notClothing" data-card="${lib.esc(c.id)}">Not clothing</button></div></div>`).join("")}</div>`
+  const actionsFor = (c) => archivedView
+    ? `<div class="row wrap"><span class="sub" style="flex:1">${c.status === "dismissed" ? "Dismissed" : "Archived"} ${lib.esc(lib.timeAgo(c.status_changed))}</span>
+        <button type="button" class="btn primary" data-act="restorePurchase" data-card="${lib.esc(c.id)}">Restore</button></div>`
+    : `<div class="row wrap"><button type="button" class="btn primary" data-act="openSheet" data-kind="matchPurchase" data-field="${lib.esc(c.id)}">Match to garment</button>
+        <button type="button" class="btn" data-act="dismissPurchase" data-card="${lib.esc(c.id)}">Dismiss</button>
+        <button type="button" class="btn" data-act="notClothing" data-card="${lib.esc(c.id)}">Not clothing</button></div>`;
+  const empty = archivedView
+    ? `<div class="card empty"><strong>Nothing archived</strong><span class="hint">Dismissed cards and cards archived after a while show up here.</span></div>`
     : `<div class="card empty"><strong>No purchases waiting</strong><span class="hint">New orders from the stores you chose show up here.</span></div>`;
-  return `<div class="row wrap" style="margin:8px 0"><span class="sub" style="flex:1">${line}</span>
-      ${status.connected ? `<button type="button" class="btn" data-act="checkPurchases" ${ctx.state.busy?.check ? "disabled" : ""}>${ctx.state.busy?.check ? "Checking…" : "Check now"}</button>` : ""}</div>${list}`;
+  const list = cards.length
+    ? `<div class="inbox">${cards.map((c) => `<div class="card inbox-item">${lib.purchaseCard(c)}${actionsFor(c)}</div>`).join("")}</div>`
+    : empty;
+  const chips = `<div class="chips" role="group" aria-label="Purchase views">
+      <button type="button" class="chip" data-act="purchasesView" data-view="new" aria-pressed="${!archivedView}">Waiting <span class="count">${lib.unmatchedCards(data).length}</span></button>
+      <button type="button" class="chip" data-act="purchasesView" data-view="archived" aria-pressed="${archivedView}">Archived <span class="count">${archived.length}</span></button></div>`;
+  return `${chips}<div class="row wrap" style="margin:8px 0"><span class="sub" style="flex:1">${line}</span>
+      ${status.connected && !archivedView ? `<button type="button" class="btn" data-act="checkPurchases" ${state.busy?.check ? "disabled" : ""}>${state.busy?.check ? "Checking…" : "Check now"}</button>` : ""}</div>
+    ${archivedView ? "" : uniformOffers(ctx)}${list}`;
 }
 
 export function render(ctx) {
@@ -346,7 +367,23 @@ export const actions = {
     ctx.render();
   },
   search(ctx, el) { ctx.state.filters.q = el.value; ctx.render(); },
-  togglePurchases(ctx) { ctx.state.filters.purchases = !ctx.state.filters.purchases; ctx.render(); },
+  togglePurchases(ctx) {
+    ctx.state.filters.purchases = !ctx.state.filters.purchases;
+    ctx.state.filters.archivedPurchases = false;
+    ctx.render();
+  },
+  purchasesView(ctx, el) { ctx.state.filters.archivedPurchases = el.dataset.view === "archived"; ctx.render(); },
+  async restorePurchase(ctx, el) {
+    const res = await ctx.ws("purchases/restore", { card_id: el.dataset.card });
+    if (res) { ctx.toast(res.photos?.length ? "Restored" : "Restored (no photo)"); ctx.reload(); }
+  },
+  async markUniform(ctx, el) {
+    const res = await ctx.ws("purchases/uniform", { store_key: el.dataset.store, accept: true });
+    if (res) { ctx.toast(`Marked ${res.updated} garment(s) as uniform`); ctx.reload(); }
+  },
+  async declineUniform(ctx, el) {
+    if (await ctx.ws("purchases/uniform", { store_key: el.dataset.store, accept: false })) ctx.reload();
+  },
   matchSearch(ctx, el) { ctx.state.sheet.q = el.value; ctx.render(); },
   async matchPurchase(ctx, el) {
     const res = await ctx.ws("purchases/match", { card_id: el.dataset.card, garment_id: el.dataset.id });

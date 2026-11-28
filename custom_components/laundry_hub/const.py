@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "laundry_hub"
 NAME: Final = "Laundry Hub"
-VERSION: Final = "0.2.1"
+VERSION: Final = "0.2.2"
 
 # Event fired by the tap stations (ESPHome `homeassistant.event`).
 TAP_EVENT: Final = "esphome.laundry_tap"
@@ -39,6 +39,7 @@ CONF_FOLLOW_HA_THEME: Final = "follow_ha_theme"
 CONF_PURCHASE_EMAIL: Final = "purchase_email"
 CONF_PURCHASE_STORES: Final = "purchase_stores"
 CONF_PURCHASE_CUSTOM: Final = "purchase_custom_domains"
+CONF_PURCHASE_SHOPIFY: Final = "purchase_shopify_names"
 CONF_PURCHASE_INTERVAL: Final = "purchase_interval"
 CONF_PURCHASE_BACKFILL: Final = "purchase_backfill"
 CONF_PURCHASE_CLOTHING_ONLY: Final = "purchase_clothing_only"

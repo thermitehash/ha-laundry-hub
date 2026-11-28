@@ -31,6 +31,8 @@ import quopri
 import re
 from typing import Any
 
+from .stores import SHOPIFY_DOMAIN
+
 _LOGGER = logging.getLogger(__name__)
 
 GMAIL_HOST = "imap.gmail.com"
@@ -131,6 +133,7 @@ class Header:
     sender_domain: str | None
     subject: str
     date: datetime | None
+    sender_name: str = ""  # display name only (Shopify shop matching); never stored
 
 
 # --- logging guard -----------------------------------------------------------
@@ -175,6 +178,22 @@ def imap_quote(text: str) -> str:
 def imap_date(day: date) -> str:
     """IMAP SEARCH date, e.g. 01-Sep-2026 (locale independent)."""
     return f"{day.day:02d}-{_MONTHS[day.month - 1]}-{day.year}"
+
+
+def _words(terms: list[str]) -> str:
+    return " OR ".join(f'"{t}"' if " " in t else t for t in terms)
+
+
+def gmail_shopify_query(names: list[str], days: int, keywords: list[str]) -> str:
+    """X-GM-RAW query for Shopify shops: the shared sender plus the shop names.
+
+    Gmail matches the names anywhere in the message, so this only narrows the
+    search; the header check (display name or subject) decides.
+    """
+    query = f"from:{SHOPIFY_DOMAIN} ({_words(names)}) newer_than:{max(1, days)}d"
+    if keywords:
+        query += f" subject:({_words(keywords)})"
+    return query
 
 
 def gmail_query(domains: list[str], days: int, keywords: list[str]) -> str:
@@ -225,12 +244,14 @@ def parse_headers(uid: int, raw: bytes) -> Header:
     except (TypeError, ValueError, IndexError):
         when = None
     message_id = str(message.get("Message-ID") or "").strip() or None
+    from_header = str(message.get("From") or "")
     return Header(
         uid=uid,
         message_id=message_id,
-        sender_domain=sender_domain(str(message.get("From") or "")),
+        sender_domain=sender_domain(from_header),
         subject=_decode_header(str(message.get("Subject") or "")),
         date=when,
+        sender_name=parseaddr(_decode_header(from_header))[0],
     )
 
 
@@ -392,6 +413,18 @@ class MailboxSession:
         for domain in domains:
             found.update(await self.search("SINCE", since, "FROM", imap_quote(domain)))
         return sorted(found)
+
+    async def search_shopify(
+        self, names: list[str], days: int, keywords: list[str]
+    ) -> list[int]:
+        """Shopify mail that may be from these shops (headers decide later)."""
+        if not names:
+            return []
+        if self.account.is_gmail:
+            query = gmail_shopify_query(names, days, keywords)
+            return await self.search("X-GM-RAW", imap_quote(query))
+        since = imap_date(date.today() - timedelta(days=max(1, days)))
+        return await self.search("SINCE", since, "FROM", imap_quote(SHOPIFY_DOMAIN))
 
     async def fetch_headers(self, uids: list[int]) -> list[Header]:
         """Headers only (FROM, SUBJECT, DATE, MESSAGE-ID), read-only PEEK."""
