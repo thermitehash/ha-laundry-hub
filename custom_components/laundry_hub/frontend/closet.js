@@ -84,6 +84,9 @@ function chipRow(ctx) {
   const f = state.filters;
   const owners = [...new Set(data.garments.map((g) => g.owner).filter(Boolean))];
   const out = [];
+  if (ctx.wardrobe && data.purchases && (data.purchases.connected || lib.unmatchedCards(data).length)) {
+    out.push(chip(ctx, { label: "Purchases", act: "togglePurchases", on: f.purchases, count: lib.unmatchedCards(data).length }));
+  }
   for (const owner of owners) {
     const n = countFor(ctx, "owner", owner);
     if (n || f.owner.includes(owner)) out.push(chip(ctx, { label: ctx.personName(owner), act: "toggleFilter", attrs: `data-field="owner" data-value="${lib.esc(owner)}"`, on: f.owner.includes(owner), count: n }));
@@ -144,8 +147,31 @@ export function filtered(ctx) {
   return ctx.data.garments.filter((g) => matches(ctx, g, ctx.state.filters)).sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// The purchase inbox (Purchases chip): match, dismiss or "not clothing".
+function purchasesInbox(ctx) {
+  const { lib, data } = ctx;
+  const status = data.purchases || {};
+  const cards = lib.unmatchedCards(data);
+  const line = status.connected
+    ? `Checked ${lib.esc(lib.timeAgo(status.last_check))}${status.last_error ? ` · last problem: ${lib.esc(status.last_error)}` : ""}`
+    : "Purchase emails aren't connected. Connect them in Laundry Hub → Configure → Purchase emails.";
+  const list = cards.length
+    ? `<div class="inbox">${cards.map((c) => `<div class="card inbox-item">${lib.purchaseCard(c)}
+        <div class="row wrap"><button type="button" class="btn primary" data-act="openSheet" data-kind="matchPurchase" data-field="${lib.esc(c.id)}">Match to garment</button>
+          <button type="button" class="btn" data-act="dismissPurchase" data-card="${lib.esc(c.id)}">Dismiss</button>
+          <button type="button" class="btn" data-act="notClothing" data-card="${lib.esc(c.id)}">Not clothing</button></div></div>`).join("")}</div>`
+    : `<div class="card empty"><strong>No purchases waiting</strong><span class="hint">New orders from the stores you chose show up here.</span></div>`;
+  return `<div class="row wrap" style="margin:8px 0"><span class="sub" style="flex:1">${line}</span>
+      ${status.connected ? `<button type="button" class="btn" data-act="checkPurchases" ${ctx.state.busy?.check ? "disabled" : ""}>${ctx.state.busy?.check ? "Checking…" : "Check now"}</button>` : ""}</div>${list}`;
+}
+
 export function render(ctx) {
   const { lib, state } = ctx;
+  if (state.filters.purchases && ctx.wardrobe) {
+    return `<div class="page-head"><h1>Purchases</h1>
+        <button type="button" class="btn" data-act="togglePurchases">${lib.ICON.back}All garments</button></div>
+      <span class="hint">From the order emails of the stores you chose. Nothing is matched automatically.</span>${purchasesInbox(ctx)}`;
+  }
   const list = filtered(ctx);
   const sel = state.select;
   const review = ctx.wardrobe ? list.filter((g) => g.needs_review).length : 0;
@@ -256,6 +282,22 @@ function setFieldSheet(ctx) {
     ${multi ? `<button type="button" class="btn primary block" data-act="applySetField" data-value='${lib.esc(JSON.stringify(picked))}'>Set ${picked.length || "none"}</button>` : ""}`;
 }
 
+function matchSheet(ctx) {
+  const { lib, data, state } = ctx;
+  const card = (data.purchases?.cards || []).find((c) => c.id === state.sheet.field);
+  if (!card) return `<p>That purchase is gone.</p>`;
+  const q = (state.sheet.q || "").toLowerCase().trim();
+  const garments = data.garments
+    .filter((g) => !q || `${g.name} ${g.brand || ""} ${ctx.personName(g.owner)}`.toLowerCase().includes(q))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, 40);
+  return `<div class="sheet-head"><h2>Match “${lib.esc(card.name)}”</h2><button type="button" class="icon-btn plain" data-act="closeSheet" aria-label="Close">${lib.ICON.close}</button></div>
+    <label class="search">${lib.ICON.search}<span class="sr-only">Search garments</span>
+      <input type="search" data-input="matchSearch" data-keep="matchSearch" placeholder="Search garments" value="${lib.esc(state.sheet.q || "")}"></label>
+    <div class="stack">${garments.map((g) => `<button type="button" class="pick-row" data-act="matchPurchase" data-card="${lib.esc(card.id)}" data-id="${g.id}">
+      <span class="avatar">${lib.esc(lib.initials(g.name))}</span><span style="flex:1;text-align:left">${lib.esc(g.name)}</span><span class="sub">${lib.esc(ctx.personName(g.owner))}</span></button>`).join("") || `<span class="hint">No garments match.</span>`}</div>`;
+}
+
 export function renderSheet(ctx) {
   const { lib, state } = ctx;
   const sheet = state.sheet;
@@ -263,6 +305,7 @@ export function renderSheet(ctx) {
   if (sheet.kind === "filters") inner = filtersSheet(ctx);
   else if (sheet.kind === "bulk") inner = bulkSheet(ctx, sheet.field);
   else if (sheet.kind === "setfield") inner = setFieldSheet(ctx);
+  else if (sheet.kind === "matchPurchase") inner = matchSheet(ctx);
   else if (sheet.kind === "confirmDelete") {
     inner = `<h2>Delete ${state.select.ids.size} garment(s)?</h2><p class="hint" style="margin:0">Their tags become unknown again. This can't be undone.</p>
       <div class="row"><button type="button" class="btn" data-act="closeSheet">Cancel</button><span class="spacer"></span><button type="button" class="btn primary" style="background:var(--hub-problem)" data-act="bulkDelete">Delete</button></div>`;
@@ -299,10 +342,33 @@ export const actions = {
     ctx.render();
   },
   clearFilters(ctx) {
-    ctx.state.filters = { q: "", owner: [], location: [], bin: [], needsPhoto: false, needsReview: false, archived: false, tax: {} };
+    ctx.state.filters = { q: "", owner: [], location: [], bin: [], needsPhoto: false, needsReview: false, archived: false, purchases: false, tax: {} };
     ctx.render();
   },
   search(ctx, el) { ctx.state.filters.q = el.value; ctx.render(); },
+  togglePurchases(ctx) { ctx.state.filters.purchases = !ctx.state.filters.purchases; ctx.render(); },
+  matchSearch(ctx, el) { ctx.state.sheet.q = el.value; ctx.render(); },
+  async matchPurchase(ctx, el) {
+    const res = await ctx.ws("purchases/match", { card_id: el.dataset.card, garment_id: el.dataset.id });
+    if (res) { ctx.toast(`Matched to ${res.name}`); ctx.update({ sheet: null }); ctx.reload(); }
+  },
+  async dismissPurchase(ctx, el) {
+    if (await ctx.ws("purchases/dismiss", { card_id: el.dataset.card })) { ctx.toast("Dismissed"); ctx.reload(); }
+  },
+  async notClothing(ctx, el) {
+    if (await ctx.ws("purchases/dismiss", { card_id: el.dataset.card, not_clothing: true })) {
+      ctx.toast("Got it — that product won't show up again");
+      ctx.reload();
+    }
+  },
+  async checkPurchases(ctx) {
+    ctx.state.busy = { ...(ctx.state.busy || {}), check: true };
+    ctx.render();
+    const res = await ctx.ws("purchases/check", {});
+    ctx.state.busy = { ...(ctx.state.busy || {}), check: false };
+    if (res) ctx.toast(res.skipped ? "A check is already running" : `${res.new_cards || 0} new, ${res.updated_cards || 0} updated`);
+    ctx.reload();
+  },
   range(ctx, el) {
     const field = el.dataset.field;
     const current = ctx.state.filters.tax[field] || [1, 5];

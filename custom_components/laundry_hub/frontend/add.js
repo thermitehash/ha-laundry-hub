@@ -14,7 +14,12 @@ function rememberDry(binId, dryId) {
 }
 
 export function reset(state) {
-  state.add = { step: 1, uid: "", manual: false, form: {}, garmentId: null, preview: null, busy: false, seenAt: null, known: null };
+  state.add = { step: 1, uid: "", manual: false, form: {}, garmentId: null, preview: null, busy: false, seenAt: null, known: null, card: null, askOrder: false };
+}
+
+// Step 2 starts with "Is this from a recent order?" when unmatched purchase cards exist.
+function enterBasics(ctx, patch) {
+  Object.assign(ctx.state.add, patch, { step: 2, card: null, askOrder: ctx.wardrobe && ctx.lib.unmatchedCards(ctx.data).length > 0 });
 }
 
 // Live tap from any station while Add is open.
@@ -22,10 +27,7 @@ export function onTap(ctx, tap) {
   const add = ctx.state.add;
   if (ctx.state.tab !== "add" || add.step !== 1) return;
   if (tap.event_type === "unknown") {
-    add.uid = tap.uid;
-    add.seenAt = tap.station;
-    add.known = null;
-    add.step = 2;
+    enterBasics(ctx, { uid: tap.uid, seenAt: tap.station, known: null });
     ctx.render();
   } else if (tap.garment_id) {
     add.known = tap;
@@ -59,6 +61,25 @@ function stepTag(ctx) {
         …${lib.esc(t.uid.slice(-6))} · ${lib.esc(lib.STATION_LABEL[t.station] || t.station)} · ${lib.esc(lib.timeAgo(t.last_seen))}</button>`).join("")}</div>` : ""}`;
 }
 
+function stepOrder(ctx) {
+  const { lib, data } = ctx;
+  const cards = lib.unmatchedCards(data);
+  return `<div class="card row"><span class="hint">Tag</span><strong style="font-family:monospace">${lib.esc(ctx.state.add.uid)}</strong><span class="spacer"></span>
+      <button type="button" class="link" data-act="backToTag">Change</button></div>
+    <h2 class="section-label" style="margin:8px 0 0">Is this from a recent order?</h2>
+    <span class="hint">Pick it to fill in the name, brand, size, purchase details and photo.</span>
+    <div class="order-row" role="list">${cards.map((c) => `<div role="listitem">${lib.purchaseCard(c, { act: "pickOrder" })}</div>`).join("")}</div>
+    <button type="button" class="btn block" data-act="noOrder">None of these</button>`;
+}
+
+function orderBanner(ctx) {
+  const { lib, data, state } = ctx;
+  const card = (data.purchases?.cards || []).find((c) => c.id === state.add.card);
+  if (!card) return "";
+  return `<div class="card row origin">${lib.ICON.sparkle}<span style="flex:1">From your ${lib.esc(card.store)} order${card.order_date ? `, ${lib.esc(lib.shortDate(card.order_date))}` : ""}</span>
+    <button type="button" class="link" data-act="changeOrder">Change</button></div>`;
+}
+
 function stepBasics(ctx) {
   const { lib, data, state } = ctx;
   const add = state.add;
@@ -70,7 +91,7 @@ function stepBasics(ctx) {
     return `<div class="card">Add at least one wash bin and one dry type under Settings → Devices &amp; services → Laundry Hub.</div>`;
   }
   const people = [{ id: "", name: "No owner" }, ...data.persons.map((p) => ({ id: p.entity_id, name: p.name }))];
-  return `<form data-submit="saveBasics" class="stack">
+  return `<form data-submit="saveBasics" class="stack">${orderBanner(ctx)}
     <div class="card row"><span class="hint">Tag</span><strong style="font-family:monospace">${lib.esc(add.uid)}</strong><span class="spacer"></span>
       <button type="button" class="link" data-act="backToTag">Change</button></div>
     <label class="field">Name<input class="input" name="name" data-keep="name" required maxlength="100" autocomplete="off" placeholder="Blue hoodie" value="${lib.esc(f.name || "")}" data-input="formField" data-field="name"></label>
@@ -182,7 +203,7 @@ export function render(ctx) {
   const add = ctx.state.add;
   const total = ctx.wardrobe ? 4 : 3;
   const shown = !ctx.wardrobe && add.step === 4 ? 3 : add.step;
-  const body = add.step === 1 ? stepTag(ctx) : add.step === 2 ? stepBasics(ctx) : add.step === 3 ? stepWardrobe(ctx) : stepSaved(ctx);
+  const body = add.step === 1 ? stepTag(ctx) : add.step === 2 ? (add.askOrder ? stepOrder(ctx) : stepBasics(ctx)) : add.step === 3 ? stepWardrobe(ctx) : stepSaved(ctx);
   return `<div class="page-head" style="flex-direction:column;align-items:stretch;gap:10px"><h1>Add a garment</h1>${stepsBar(shown, total)}</div>
     <div class="stack" style="max-width:640px">${body}</div>`;
 }
@@ -192,10 +213,21 @@ export const actions = {
   manualUid(ctx, form) {
     const uid = new FormData(form).get("uid").toString().trim();
     if (!uid) return;
-    Object.assign(ctx.state.add, { uid, step: 2, seenAt: null });
+    enterBasics(ctx, { uid, seenAt: null });
     ctx.render();
   },
-  useUid(ctx, el) { Object.assign(ctx.state.add, { uid: el.dataset.uid, seenAt: el.dataset.station, step: 2 }); ctx.render(); },
+  useUid(ctx, el) { enterBasics(ctx, { uid: el.dataset.uid, seenAt: el.dataset.station }); ctx.render(); },
+  pickOrder(ctx, el) {
+    const card = (ctx.data.purchases?.cards || []).find((c) => c.id === el.dataset.card);
+    if (!card) return;
+    const add = ctx.state.add;
+    add.card = card.id;
+    add.askOrder = false;
+    add.form.name = card.name;
+    ctx.render();
+  },
+  noOrder(ctx) { Object.assign(ctx.state.add, { askOrder: false, card: null }); ctx.render(); },
+  changeOrder(ctx) { ctx.state.add.askOrder = true; ctx.render(); },
   backToTag(ctx) { ctx.state.add.step = 1; ctx.render(); },
   formField(ctx, el) { ctx.state.add.form[el.dataset.field] = el.value; },
   pick(ctx, el) {
@@ -219,6 +251,10 @@ export const actions = {
     if (!res) { ctx.render(); return; }
     rememberDry(bin, dry);
     add.garmentId = res.id;
+    if (add.card) {
+      // Copies the card's photos and purchase details; the card itself is kept.
+      if (await ctx.ws("purchases/match", { card_id: add.card, garment_id: res.id })) add.card = null;
+    }
     add.step = ctx.wardrobe ? 3 : 4;
     ctx.reload();
   },

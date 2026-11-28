@@ -7,7 +7,7 @@ from typing import Final
 
 DOMAIN: Final = "laundry_hub"
 NAME: Final = "Laundry Hub"
-VERSION: Final = "0.2.0"
+VERSION: Final = "0.2.1"
 
 # Event fired by the tap stations (ESPHome `homeassistant.event`).
 TAP_EVENT: Final = "esphome.laundry_tap"
@@ -34,6 +34,22 @@ CONF_NOTIFY_TARGET: Final = "notify_target"
 CONF_WARDROBE_ENABLED: Final = "wardrobe_enabled"
 CONF_AI_TASK_ENTITY: Final = "ai_task_entity"
 CONF_FOLLOW_HA_THEME: Final = "follow_ha_theme"
+
+# Purchase emails (v0.2.1). Credentials live in entry.data, settings in options.
+CONF_PURCHASE_EMAIL: Final = "purchase_email"
+CONF_PURCHASE_STORES: Final = "purchase_stores"
+CONF_PURCHASE_CUSTOM: Final = "purchase_custom_domains"
+CONF_PURCHASE_INTERVAL: Final = "purchase_interval"
+CONF_PURCHASE_BACKFILL: Final = "purchase_backfill"
+CONF_PURCHASE_CLOTHING_ONLY: Final = "purchase_clothing_only"
+CONF_PURCHASE_ARCHIVE_DAYS: Final = "purchase_archive_days"
+DEFAULT_PURCHASE_INTERVAL: Final = 30  # minutes
+MIN_PURCHASE_INTERVAL: Final = 15
+DEFAULT_PURCHASE_BACKFILL: Final = 90  # days
+PURCHASE_BACKFILL_CHOICES: Final = (0, 30, 90, 365)
+DEFAULT_PURCHASE_ARCHIVE_DAYS: Final = 60
+PURCHASE_COUNT_DAYS: Final = 90  # store list counts in the options flow
+ISSUE_PURCHASE_AUTH: Final = "purchase_email_auth"
 
 DEFAULT_FEEDBACK_TIMEOUT: Final = 2.0
 DEFAULT_FLASH_DURATION: Final = 15
@@ -88,6 +104,7 @@ REPEAT_WINDOW: Final = timedelta(minutes=5)
 # Storage.
 STORAGE_KEY: Final = DOMAIN
 STORAGE_VERSION: Final = 3
+STORAGE_MINOR_VERSION: Final = 2  # 3.2 adds purchases (lossless, no backup needed)
 STORAGE_SAVE_DELAY: Final = 5  # seconds (debounced writes)
 
 PHOTO_DIR: Final = "laundry_hub/photos"

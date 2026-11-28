@@ -39,7 +39,7 @@ function data(wardrobe) {
     w(garment("g02", "Red sweater", { state: "in_wash", location: "laundry" }), desc("top", "sweater", ["red"])),
     w(garment("g03", "Grey hoodie", { missing: true, owner: null }), null, { needs_review: true }),
     w(garment("g04", "Black leggings", { state: "drying", location: "laundry", recent_taps: [{ time: iso(120), station: "laundry", event: "drying", mode: "auto", repeat: false }] }), desc("bottom", "leggings", ["navy"], { rise: "high", sleeve_length: "n/a" })),
-    w(garment("g05", "White button-down", { location: "closet_2", wash_bin: "b2" }), desc("top", "button-down", ["navy"])),
+    w(garment("g05", "White button-down", { location: "closet_2", wash_bin: "b2" }), desc("top", "button-down", ["navy"]), { purchase: { store: "Target", purchased_on: "2026-11-20", price: 8, currency: "USD", product_url: "https://target.example/p", order_ref: "T-9", source: "email" } }),
   ];
   return {
     garments,
@@ -71,6 +71,13 @@ function data(wardrobe) {
       size_cuts: ["regular", "petite", "n/a"], lifecycles: ["active"], description_fields: [], review_fields: [], review_confidence: 0.7,
     } : null,
     persons: [{ entity_id: "person.heather", name: "Heather" }, { entity_id: "person.sam", name: "Sam" }],
+    purchases: wardrobe ? {
+      connected: true, provider: "gmail", stores: 3, last_check: iso(12), last_error: null, new_cards: 2,
+      cards: [
+        { id: "p1", status: "new", store: "Old Navy", store_key: "old_navy", order_ref: "ON-1", order_date: "2026-11-22", currency: "USD", name: `High-Waisted Wow Jeans ${XSS}`, brand: "Old Navy", color: "Black", size: "8 Tall", quantity: 1, unit_price: 44.99, product_url: "https://oldnavy.example/p", photos: ["purchase-p1-a.jpg"], photo_urls: [{ name: "purchase-p1-a.jpg", full: PIXEL, thumb: PIXEL }], garment_id: null, created: iso(60), updated: iso(60), status_changed: iso(60) },
+        { id: "p2", status: "new", store: "Target", store_key: "target", order_ref: "T-9", order_date: "2026-11-20", currency: "USD", name: "Short Sleeve T-Shirt with a rather long product name that wraps", brand: null, color: "White", size: "XS", quantity: 1, unit_price: 8, product_url: null, photos: [], photo_urls: [], garment_id: null, created: iso(90), updated: iso(90), status_changed: iso(90) },
+      ],
+    } : null,
   };
 }
 
@@ -177,6 +184,28 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   await shot(page, `${tag}-select`);
   await click(page, '[data-act="toggleSelectMode"]'); await settle(page);
 
+  // Purchases inbox
+  await click(page, '[data-act="togglePurchases"]'); await settle(page);
+  t = await text(page);
+  if (!t.includes("Match to garment") || !t.includes("Not clothing") || !t.includes("Checked 12 min ago")) fail(`${tag}: purchases inbox`);
+  await noHScroll(page, `${tag} purchases`);
+  await shot(page, `${tag}-purchases`);
+  await click(page, '[data-act="openSheet"][data-kind="matchPurchase"][data-field="p2"]'); await settle(page);
+  await sr(page, "const i = root.querySelector('input[data-input=matchSearch]'); i.value = 'button'; i.dispatchEvent(new Event('input', {bubbles:true}));"); await settle(page);
+  const rows = await sr(page, "return [...root.querySelectorAll('[data-act=matchPurchase]')].map(e=>e.dataset.id).join(',')");
+  if (rows !== "g05") fail(`${tag}: match search (${rows})`);
+  await shot(page, `${tag}-match`);
+  await click(page, '[data-act="matchPurchase"][data-id="g05"]'); await settle(page);
+  const m = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/purchases/match").pop());
+  if (!m || m.card_id !== "p2" || m.garment_id !== "g05") fail(`${tag}: match call ${JSON.stringify(m)}`);
+  await click(page, '[data-act="notClothing"][data-card="p2"]'); await settle(page);
+  const nc = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/purchases/dismiss").pop());
+  if (!nc || nc.not_clothing !== true) fail(`${tag}: not clothing call`);
+  await click(page, '[data-act="togglePurchases"]'); await settle(page);
+  await click(page, '.gcard[data-id="g05"]'); await settle(page);
+  if (!(await text(page)).includes("From your Target order")) fail(`${tag}: detail origin line`);
+  await click(page, '[data-act="closeGarment"]'); await settle(page);
+
   // Detail
   await click(page, '.gcard[data-id="g01"]'); await settle(page);
   t = await text(page);
@@ -192,7 +221,16 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   await page.evaluate(() => window.__push({ tap: { event_type: "unknown", uid: "11223344", station: "closet_1" } }));
   await settle(page);
   t = await text(page);
+  if (!t.includes("Is this from a recent order?") || !t.includes("Old Navy") || !t.includes("None of these")) fail(`${tag}: order question not shown`);
+  if (await page.evaluate(() => window.__xss)) fail(`${tag}: XSS executed (purchase card)`);
+  await noHScroll(page, `${tag} add order`);
+  await shot(page, `${tag}-add-order`);
+  await click(page, '[data-act="pickOrder"][data-card="p1"]'); await settle(page);
+  t = await text(page);
   if (!t.includes("11223344") || !t.includes("Wash bin")) fail(`${tag}: live tap did not fill the UID`);
+  if (!t.includes("From your Old Navy order")) fail(`${tag}: order banner missing`);
+  const prefilled = await sr(page, "return root.querySelector('input[name=name]').value");
+  if (!prefilled.startsWith("High-Waisted Wow Jeans")) fail(`${tag}: name not prefilled from card (${prefilled})`);
   const loc = await sr(page, "return root.querySelector('[data-field=location][aria-pressed=true]')?.dataset.value");
   if (loc !== "closet_1") fail(`${tag}: location not prefilled from station (${loc})`);
   await noHScroll(page, `${tag} add basics`);
@@ -200,6 +238,8 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   await sr(page, "root.querySelector('input[name=name]').value = 'Tee'; root.querySelector('form[data-submit=saveBasics]').requestSubmit();");
   await page.waitForTimeout(250);
   const created = await page.evaluate(() => window.__calls.find((c) => c.type === "laundry_hub/garment/create"));
+  const matched = await page.evaluate(() => window.__calls.find((c) => c.type === "laundry_hub/purchases/match" && c.card_id === "p1"));
+  if (!matched || matched.card_id !== "p1" || matched.garment_id !== "g01") fail(`${tag}: card not matched after create ${JSON.stringify(matched)}`);
   if (!created || created.uid !== "11223344" || created.location !== "closet_1" || created.wash_bin !== "b1") fail(`${tag}: create payload ${JSON.stringify(created)}`);
   if (!(await text(page)).includes("Photos")) fail(`${tag}: wardrobe step not shown`);
 
@@ -232,6 +272,47 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   if (d.includes("Re-describe") || d.includes("Purchase")) fail("wardrobe off: wardrobe detail shown");
   await shot(page, "phone-wardrobe-off-detail");
   if (errors.length) fail(`wardrobe off: errors ${errors.join(" | ")}`);
+  await context.close();
+}
+
+// HEIC: converted to JPEG in the browser; undecodable HEIC shows the friendly message.
+{
+  const { context, page, errors } = await setup(browser, { width: 390, height: 844 }, true);
+  const result = await page.evaluate(async () => {
+    const lib = await import("/laundry_hub_static/lib.js?v=0.2.0");
+    const out = {};
+    out.detect = [
+      lib.isHeic(new File(["x"], "IMG_1.HEIC", { type: "" })),
+      lib.isHeic(new File(["x"], "a.jpg", { type: "image/heif" })),
+      lib.isHeic(new File(["x"], "a.jpg", { type: "image/jpeg" })),
+    ];
+    // Chromium can't decode HEIC: the upload is skipped with the friendly message.
+    const panel = document.querySelector("laundry-hub-panel");
+    window.__fetches = 0;
+    const realFetch = panel.hass.fetchWithAuth;
+    panel.hass.fetchWithAuth = async (...args) => { window.__fetches += 1; return realFetch(...args); };
+    await panel.upload("g01", [new File(["not really heic"], "IMG_2.HEIC", { type: "image/heic" })]);
+    out.toast = panel.shadowRoot.querySelector(".toast")?.textContent || "";
+    out.fetchesAfterBad = window.__fetches;
+    // A browser that can decode it (Safari): stand in with a decodable bitmap.
+    const canvas = document.createElement("canvas");
+    canvas.width = 30; canvas.height = 20;
+    const real = window.createImageBitmap.bind(window);
+    window.createImageBitmap = async () => real(canvas);
+    const jpeg = await lib.prepareUpload(new File(["heic bytes"], "IMG_3.heic", { type: "image/heic" }));
+    out.converted = [jpeg.type, jpeg.name, jpeg.size > 0];
+    await panel.upload("g01", [new File(["heic bytes"], "IMG_4.HEIC", { type: "" })]);
+    out.fetchesAfterGood = window.__fetches;
+    window.createImageBitmap = real;
+    return out;
+  });
+  if (JSON.stringify(result.detect) !== "[true,true,false]") fail(`heic: detection ${JSON.stringify(result.detect)}`);
+  if (!result.toast.includes("Most Compatible")) fail(`heic: unsupported message missing (${result.toast})`);
+  if (result.fetchesAfterBad !== 0) fail("heic: undecodable HEIC was uploaded");
+  if (JSON.stringify(result.converted) !== '["image/jpeg","IMG_3.jpg",true]') fail(`heic: conversion ${JSON.stringify(result.converted)}`);
+  if (result.fetchesAfterGood !== 1) fail("heic: converted photo not uploaded");
+  const real = errors.filter((e) => !e.includes("Most Compatible"));
+  if (real.length) fail(`heic: errors ${real.join(" | ")}`);
   await context.close();
 }
 

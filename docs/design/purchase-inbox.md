@@ -1,8 +1,18 @@
-# Purchase inbox (design stub, built in v0.2.1)
+# Purchase inbox (built in v0.2.1)
 
-Status: design only. v0.2.0 ships the data model (a nested `purchase` dict on
-each garment) so v0.2.1 can attach email-derived purchases without another
-storage migration.
+Status: **built in v0.2.1.** This was the v0.2.0 design stub. The code lives in
+`stores.py` (store catalog), `mailbox.py` (read-only IMAP), `extract.py` (AI
+extraction and validation) and `purchases.py` (cards, matching, scheduling). It
+differs from the stub as follows:
+
+- Laundry Hub owns its IMAP connection (`aioimaplib`), never core IMAP. The
+  folder is opened with `EXAMINE`, bodies are fetched with `BODY.PEEK`, and only
+  the text/plain and text/html parts of opted-in senders are fetched (500 KB cap).
+- Gmail filters on Google's side with `X-GM-RAW`; generic IMAP uses `SINCE` and
+  `FROM` per domain, with the subject filter applied locally after headers.
+- Cards are a `purchases` collection in the store (schema 3.2, a minor bump).
+  Matching copies card photos onto the garment. It never moves them.
+- Links the AI returns must appear verbatim in the email text that was sent.
 
 ## Flow
 

@@ -24,6 +24,7 @@ from .const import (
     STATION_LAUNDRY,
     STATIONS,
     STORAGE_KEY,
+    STORAGE_MINOR_VERSION,
     STORAGE_SAVE_DELAY,
     STORAGE_VERSION,
     STORED_STATES,
@@ -34,6 +35,12 @@ from .taxonomy import remap_description
 _LOGGER = logging.getLogger(__name__)
 
 MAX_UNKNOWN_TAGS = 50
+_TOP_KEYS = frozenset(
+    {
+        "garments", "last_unknown", "unknown_tags", "quarantine", "owners",
+        "stations", "purchases", "purchase_meta",
+    }
+)  # fmt: skip
 
 
 class CatalogError(Exception):
@@ -154,6 +161,19 @@ def migrate_v2(old: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def migrate_v3_1(old: dict[str, Any]) -> dict[str, Any]:
+    """3.1 (v0.2.0) → 3.2 (v0.2.1): add the purchase inbox; nothing else changes.
+
+    A minor bump: v0.2.0 can still load a 3.2 file (it ignores the new keys).
+    """
+    data = dict(old)
+    if not isinstance(data.get("purchases"), dict):
+        data["purchases"] = {}
+    if not isinstance(data.get("purchase_meta"), dict):
+        data["purchase_meta"] = {}
+    return data
+
+
 # New v3 garment keys and their defaults ("reserved" = stored only, used in v0.3).
 V3_GARMENT_DEFAULTS: dict[str, Any] = {
     "brand": None,
@@ -187,13 +207,14 @@ class _CatalogStore(Store[dict[str, Any]]):
         old_minor_version: int,
         old_data: dict[str, Any],
     ) -> dict[str, Any]:
-        await self._async_backup(old_major_version, old_minor_version, old_data)
         data = old_data
+        if old_major_version < STORAGE_VERSION:
+            await self._async_backup(old_major_version, old_minor_version, old_data)
         if old_major_version < 2:
             data = migrate_v1(data)
         if old_major_version < 3:
             data = migrate_v2(data)
-        return data
+        return migrate_v3_1(data)
 
     async def _async_backup(
         self, major: int, minor: int, old_data: dict[str, Any]
@@ -222,7 +243,11 @@ class Catalog:
     def __init__(self, hass: HomeAssistant) -> None:
         """Initialize."""
         self._store = _CatalogStore(
-            hass, STORAGE_VERSION, STORAGE_KEY, atomic_writes=True
+            hass,
+            STORAGE_VERSION,
+            STORAGE_KEY,
+            atomic_writes=True,
+            minor_version=STORAGE_MINOR_VERSION,
         )
         self.garments: dict[str, Garment] = {}
         self.uid_index: dict[str, str] = {}
@@ -231,6 +256,9 @@ class Catalog:
         self.quarantine: list[Any] = []
         self.owners: dict[str, dict[str, Any]] = {}
         self.stations: dict[str, dict[str, Any]] = {}
+        self.purchases: dict[str, dict[str, Any]] = {}
+        self.purchase_meta: dict[str, Any] = {}
+        self.extra: dict[str, Any] = {}
 
     async def async_load(self) -> None:
         """Load and validate stored data; malformed records are quarantined."""
@@ -267,6 +295,16 @@ class Catalog:
         self.owners = owners if isinstance(owners, dict) else {}
         stations = data.get("stations")
         self.stations = stations if isinstance(stations, dict) else {}
+        purchases = data.get("purchases")
+        self.purchases = {
+            str(cid): card
+            for cid, card in (purchases if isinstance(purchases, dict) else {}).items()
+            if isinstance(card, dict)
+        }
+        meta = data.get("purchase_meta")
+        self.purchase_meta = meta if isinstance(meta, dict) else {}
+        # Top-level keys written by a newer version are kept on save.
+        self.extra = {k: v for k, v in data.items() if k not in _TOP_KEYS}
         for garment in self.garments.values():
             if garment.description:
                 garment.description = remap_description(garment.description)
@@ -277,12 +315,15 @@ class Catalog:
 
     def _data(self) -> dict[str, Any]:
         return {
+            **self.extra,
             "garments": {gid: g.to_dict() for gid, g in self.garments.items()},
             "last_unknown": self.last_unknown,
             "unknown_tags": self.unknown_tags,
             "quarantine": self.quarantine,
             "owners": self.owners,
             "stations": self.stations,
+            "purchases": self.purchases,
+            "purchase_meta": self.purchase_meta,
         }
 
     def schedule_save(self) -> None:

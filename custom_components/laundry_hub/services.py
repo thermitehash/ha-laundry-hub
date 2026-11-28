@@ -171,6 +171,19 @@ def async_setup_services(hass: HomeAssistant) -> None:
         schema=IMPORT_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
     )
+
+    async def check_purchase_emails(call: ServiceCall) -> ServiceResponse:
+        hub = _hub(hass)
+        hub.wardrobe.require()
+        return await hub.purchases.async_check(manual=True)
+
+    hass.services.async_register(
+        DOMAIN,
+        "check_purchase_emails",
+        check_purchase_emails,
+        schema=vol.Schema({}),
+        supports_response=SupportsResponse.OPTIONAL,
+    )
     hass.services.async_register(
         DOMAIN,
         "describe_garment",

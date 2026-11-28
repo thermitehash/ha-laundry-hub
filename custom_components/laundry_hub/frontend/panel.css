@@ -193,3 +193,22 @@ details.more > summary::-webkit-details-marker { display: none; }
   .ring::before { animation: none; opacity: .5; }
   * { scroll-behavior: auto !important; transition: none !important; }
 }
+
+/* Purchase cards (v0.2.1) */
+.pcard { display: flex; gap: var(--hub-space-3); align-items: center; background: var(--hub-card); border: 2px solid transparent; border-radius: var(--hub-radius-card); padding: 8px; color: inherit; text-align: left; min-width: 0; width: 100%; }
+button.pcard { cursor: pointer; min-height: var(--hub-touch); }
+button.pcard:focus-visible, button.pcard[aria-pressed="true"] { border-color: var(--app-accent); }
+.pcard .pmedia { width: 64px; height: 64px; flex: none; border-radius: var(--hub-radius-control); overflow: hidden; background: var(--app-surface); display: flex; align-items: center; justify-content: center; font-weight: 600; color: var(--hub-text-muted); }
+.pcard .pmedia img { width: 100%; height: 100%; object-fit: cover; }
+.pcard .pbody { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.pcard .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.pcard .meta { font-size: var(--hub-text-sm); color: var(--hub-text-muted); }
+.order-row { display: flex; gap: var(--hub-space-2); overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 4px; max-width: 100%; }
+.order-row > * { flex: 0 0 min(240px, 78%); scroll-snap-align: start; }
+.order-row .pcard { flex-direction: column; align-items: stretch; height: 100%; border: 1px solid var(--app-border); }
+.order-row .pcard .pmedia { width: 100%; height: 140px; }
+.inbox { display: grid; gap: var(--hub-space-2); grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
+.inbox-item { display: flex; flex-direction: column; gap: var(--hub-space-2); }
+.inbox-item .pcard { padding: 0; }
+.origin { display: flex; gap: 8px; align-items: center; color: var(--hub-text-muted); font-size: var(--hub-text-sm); }
+.pick-row { display: flex; align-items: center; gap: var(--hub-space-2); min-height: var(--hub-touch); padding: 6px 8px; border-radius: var(--hub-radius-control); border: 1px solid var(--app-border); background: var(--hub-card); color: inherit; cursor: pointer; }

@@ -78,6 +78,10 @@ class PhotosView(HomeAssistantView):
         owned = any(
             filename in g.photos or filename in {thumb_name(p) for p in g.photos}
             for g in hub.catalog.garments.values()
+        ) or any(
+            hub.purchases.owns_photo(name)
+            for name in (filename, filename.replace(".thumb.jpg", ".jpg"))
+            if name.startswith("purchase-")
         )
         path = photo_path(hass, filename)
         if not owned or path is None:

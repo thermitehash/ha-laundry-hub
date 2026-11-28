@@ -29,6 +29,7 @@ from .importer import ImportFailed, check_url, fetch_image, fetch_product
 from .photos import (
     PhotoError,
     ProcessedImage,
+    copy_photo,
     delete_photo,
     ensure_thumbnail,
     photo_dir,
@@ -320,6 +321,32 @@ class Wardrobe:
         garment.photos = [p for p in garment.photos if p != replace] + [filename]
         if replace:
             garment.photos = [filename, *garment.photos[:-1]]
+        self.hub.catalog.schedule_save()
+        self.hub.notify_changed()
+        if first and self.enabled and self.ai_entity:
+            self.hub.entry.async_create_background_task(
+                self.hass,
+                self._async_auto_describe(garment.id),
+                f"laundry_hub describe {garment.id}",
+            )
+        return filename
+
+    async def async_copy_photo(self, garment: Garment, source: str) -> str | None:
+        """Copy a stored photo (e.g. a purchase card's) onto a garment.
+
+        The source file is left alone, so deleting either one later never
+        affects the other. Returns the new filename, or None if it is gone.
+        """
+        if len(garment.photos) >= self.photo_limit():
+            return None
+        filename = f"{garment.id}-{ulid_now().lower()}.jpg"
+        directory = photo_dir(self.hass)
+        if not await self.hass.async_add_executor_job(
+            copy_photo, directory, source, filename
+        ):
+            return None
+        first = not garment.photos
+        garment.photos = [*garment.photos, filename]
         self.hub.catalog.schedule_save()
         self.hub.notify_changed()
         if first and self.enabled and self.ai_entity:
