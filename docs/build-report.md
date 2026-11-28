@@ -1,3 +1,24 @@
+# Laundry Hub build report: v0.2.4
+- Version: 0.2.4 / Date: 2026-11-28 / Repo: https://github.com/thermitehash/ha-laundry-hub
+- PR: https://github.com/thermitehash/ha-laundry-hub/pull/7 (not merged). v0.2.3 was merged in PR #6 (`690a80f`) and released as `v0.2.3`.
+- Commit: `4d4c2cc` (code); this report is committed on top as a docs-only commit
+- CI: workflow **Validate**, run 46111485671 on `4d4c2cc`: all 16 ✅
+
+## Summary
+- **Placeholder fix:** with Wardrobe off, the options flow shows the plain `settings` step, so `init` and its `{status}` description only appear as the Wardrobe-on menu. A programmatic placeholder scan checks every rendered step.
+- **Member enrolment:** from the tag the member just tapped with their phone; owner forced; new errors and the `member_enroll` capability.
+- **Member AI:** describe only through the automatic first-photo describe.
+
+## Tests
+- 335 pytest (coverage 96 %). New `tests/test_v024.py` (16): the placeholder scan across 8 states plus step coverage, repair-issue placeholders, the enrolment matrix, the just-tapped tag, and member auto-describe.
+- Two v0.2.3 assertions updated as direct results of this release.
+
+## Needs a person
+- Heather's install: open Configure with Wardrobe off and confirm the log no longer shows "Failed to format translation … status".
+- A non-admin household user: tap a new tag with the phone, enrol it, and add a first photo (it gets described).
+
+---
+
 # Laundry Hub build report: v0.2.3
 - Version: 0.2.3 / Date: 2026-11-28 / Repo: https://github.com/thermitehash/ha-laundry-hub
 - PR: https://github.com/thermitehash/ha-laundry-hub/pull/6 (not merged). v0.2.2 was merged in PR #5 (`543d302`) and released as `v0.2.2`.
