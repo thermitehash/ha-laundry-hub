@@ -1,3 +1,31 @@
+# Decisions (v0.2.7)
+
+Choices made while building v0.2.7 without asking. Each line: decision, then reason.
+
+1. **Non-clothing in the cleanup is marked, not deleted:**
+   - The card gets `not_clothing: true`, the product is remembered for that store (the same rule as the "Not clothing" button), and its remaining units are dismissed.
+   - Photos are kept, so Restore needs no download. Restore clears the flag and lifts the rule.
+   - A card that was already dismissed is just marked. Health and medication items are still deleted with their photos.
+   - The "Not clothing" button now also sets `not_clothing: true`; otherwise it behaves as before (its photos are deleted, and Restore downloads them again).
+2. **Cards marked not clothing are left out of duplicate grouping** and of later reclassifying, so each stays restorable on its own and is never counted twice.
+3. **"Done" means the cleanup ran with AI answers** (`version` ≥ `CLEANUP_VERSION` and `classified` not false). A store with no waiting or dismissed cards is done straight away, since there's nothing to ask about.
+4. **When the AI is unavailable or fails, nothing changes:**
+   - No classification, grouping or name splitting, so the real run sees the cards as they were.
+   - Only an attempt count is stored: `{version: 0, classified: false, attempts, gave_up}`.
+   - The first attempt (2 minutes after startup or at the first check) is followed by 3 retries at the next checks. After the 4th failed attempt it gives up (`gave_up: true`), and Settings shows the note with the button.
+   - Each failure logs one warning: counts only, no product names.
+5. **`CLEANUP_VERSION` stays 1.** A v0.2.6 state (version 1, `classified: false`) counts as pending and starts counting attempts afresh. A v0.2.6 state with `classified: true` stays done (no install has one).
+6. **"Reclassify old cards"** (`purchases/reclassify`, admin) runs the cleanup at any time, whatever its state:
+   - It answers `{classified, cleanup}`.
+   - When the AI is still down, it records attempt 1 again, so the note returns after the retries.
+   - The button is shown only with the note.
+7. **The cleanup status shape changed** (it was never released to an install): `data.purchases.cleanup` is `{not_clothing, health, grouped}` until OK is tapped, `{skipped: true}` after giving up, otherwise `null`. Diagnostics report the same counts plus attempts and gave_up.
+8. **Heather's answers to the v0.2.6 questions:**
+   - Q1: retry the cleanup at the next 3 checks, then a note with Reclassify (built above).
+   - Q2: "Not clothing" stays a dismiss, not a delete.
+   - Q3: one card across sizes; Split separates them when needed.
+   - Q4: app build 1 is the lowest accepted build (`MIN_CLIENT = 1`).
+
 # Decisions (v0.2.6)
 
 Choices made while building v0.2.6 without asking. Each line: decision, then reason.

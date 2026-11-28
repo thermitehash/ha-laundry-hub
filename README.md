@@ -182,9 +182,11 @@ deletes the stored address and password and asks whether to keep or delete exist
   *Uniform* ticked (you can untick it). Purchases offers once per store to mark garments you
   already matched from them as uniform.
 - **Settings** shows a read-only *Purchase emails* row (connected, stores, last check, new
-  cards, last problem) with a link to Configure. After updating to 0.2.6 it shows once
-  "Cleaned up: X non-clothing removed, Y duplicates grouped" for cards made by older
-  versions.
+  cards, last problem) with a link to Configure. After updating it shows once "Cleaned up:
+  X marked not clothing (restorable), Y health items removed, Z duplicates grouped" for
+  cards made by older versions; cards marked not clothing are in Purchases → Archived,
+  where Restore brings them back. If the AI wasn't available for that cleanup (it tries at
+  the next 3 checks), Settings says so and offers **Reclassify old cards**.
 
 > **Privacy:** Laundry Hub only reads mail, and only from the stores you opt in to. It opens
 > the folder read-only and never sends, deletes, moves or flags messages. It reads the

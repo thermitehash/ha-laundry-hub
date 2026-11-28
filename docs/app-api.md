@@ -123,7 +123,7 @@ What the server supports and who you are.
 
 ```json
 {"api_version": 1, "api_versions_supported": [1], "min_client": 1,
- "integration_version": "0.2.6", "wardrobe_enabled": true,
+ "integration_version": "0.2.7", "wardrobe_enabled": true,
  "capabilities": ["phone_tap", "changes", "if_rev", "member_enroll", "url_import", "ai_describe", "purchases", "purchase_groups", "purchase_assign"],
  "role": "member", "owner": "person.alex", "app_access": "household", "rev": 412}
 ```
@@ -290,8 +290,11 @@ Commands (admin unless noted):
   `cannot_merge` for matched cards.
 - `purchases/assign {card_id | card_ids, owner}`: `owner` a person entity or `null`.
   → `{cards}`. Error `invalid_owner`.
-- `purchases/cleanup_seen`: hides the one-time cleanup line (`data.purchases.cleanup`,
-  `{removed, grouped}` or `null`).
+- `purchases/cleanup_seen`: hides the one-time cleanup line. `data.purchases.cleanup` is
+  `{not_clothing, health, grouped}` until then (0.2.7), `{skipped: true}` when the AI was
+  unavailable and the retries ran out, otherwise `null`.
+- `purchases/reclassify` (0.2.7): runs the cleanup of old cards again now →
+  `{classified, cleanup}`.
 
 All take `if_rev` (of `card_id`).
 
@@ -311,7 +314,8 @@ Unchanged from v0.2.2; they gain only `if_rev` / `if_revs` and the policies.
   - `reassign`, `zone/remove`, `zone/flash`, `unknown/dismiss`
   - `import_product_url`, `import/apply`, `owner/update`
   - `purchases/*` (including `purchases/retry_unreadable`, 0.2.4, and `set_quantity`,
-    `split`, `merge`, `assign`, `cleanup_seen`, 0.2.6), except match and dismiss
+    `split`, `merge`, `assign`, `cleanup_seen`, 0.2.6, and `reclassify`, 0.2.7), except
+    match and dismiss
 
 ## HTTP
 

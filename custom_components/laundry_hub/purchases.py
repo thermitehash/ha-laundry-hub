@@ -106,7 +106,8 @@ HISTORY_FIELDS = (
 GROUPABLE = ("new", "dismissed", "archived")  # grouping never touches matched cards
 CLEANUP_STATUSES = ("new", "dismissed")
 SUGGEST_AFTER = 2  # similar cards assigned to one owner before a suggestion
-CLEANUP_VERSION = 1  # the one-time v0.2.6 cleanup of cards from older versions
+CLEANUP_VERSION = 1  # the one-time cleanup of cards from older versions (v0.2.6/7)
+CLEANUP_RETRIES = 3  # checks that retry it after the AI failed, before giving up
 CLEANUP_DELAY = 120  # seconds after setup
 _COLOR_FAMILIES = {
     "dark": {"black", "navy", "charcoal", "grey", "gray", "brown", "dark", "olive"},
@@ -756,69 +757,126 @@ class PurchaseInbox:
         except Exception as err:
             raise HomeAssistantError(f"{type(err).__name__}: {err}") from err
 
-    # --- one-time cleanup (v0.2.6) -----------------------------------------
+    # --- one-time cleanup (v0.2.6, reworked in v0.2.7) ------------------------
+
+    @property
+    def cleanup_state(self) -> dict[str, Any]:
+        """The stored cleanup state ({} before the first attempt)."""
+        state = self.meta.get("cleanup")
+        return state if isinstance(state, dict) else {}
 
     @property
     def cleanup_pending(self) -> bool:
-        """The v0.2.6 cleanup hasn't run on this store yet."""
-        state = self.meta.get("cleanup") or {}
-        return int(state.get("version") or 0) < CLEANUP_VERSION
+        """The cleanup still has to run (and hasn't given up).
+
+        Done means it ran *with* AI answers. A v0.2.6 store marked done with
+        ``classified: false`` (the AI never answered) still counts as pending.
+        """
+        state = self.cleanup_state
+        if state.get("gave_up"):
+            return False
+        done = int(state.get("version") or 0) >= CLEANUP_VERSION
+        return not (done and state.get("classified") is not False)
 
     async def async_cleanup_once(self) -> dict[str, Any] | None:
-        """Run the one-time cleanup now (if it hasn't run). Returns its counts."""
+        """Run the one-time cleanup now (if it's pending). Returns its state."""
         if not self.cleanup_pending or not self.hub.wardrobe.enabled:
             return None
         async with self._lock:
             return await self._async_cleanup()
 
-    async def _async_cleanup(self) -> dict[str, Any] | None:
+    async def async_reclassify(self) -> dict[str, Any] | None:
+        """Reclassify old cards (Settings): run the cleanup again now, any state."""
+        self.hub.wardrobe.require()
+        async with self._lock:
+            return await self._async_cleanup(force=True)
+
+    async def _async_cleanup(self, *, force: bool = False) -> dict[str, Any] | None:
         """Clean up cards made by older versions, once (counts logged only).
 
         1. Re-classify every new and dismissed card with the small step-2
-           request (a). Health products are deleted; with clothing-only on,
-           non-apparel cards and their photos are deleted outright. A card
-           the AI didn't answer for is kept (deletion fails closed).
+           request (a). Health products are deleted with their photos. With
+           clothing-only on, non-apparel cards are marked "Not clothing" and
+           dismissed, keeping their photos, so Restore brings them back.
         2. Group duplicates, keeping the most complete data.
         3. Split " - colour / size / cut" name suffixes on what's left.
 
+        If the AI is unavailable or fails, nothing is changed and the cleanup
+        stays pending: it's retried at each of the next ``CLEANUP_RETRIES``
+        checks, then it gives up and Settings offers "Reclassify old cards".
         Cards matched to a garment are never touched.
         """
-        if not self.cleanup_pending or not self.hub.wardrobe.enabled:
+        if not self.hub.wardrobe.enabled or not (force or self.cleanup_pending):
             return None
         self._schema_logged = False
-        removed, classified = await self._async_cleanup_classify()
+        outcome = await self._async_cleanup_classify()
+        if outcome is None:
+            return self._cleanup_failed(reset=force)
+        marked, health = outcome
         grouped = await self._async_cleanup_group()
         split = self._cleanup_split()
         result = {
             "version": CLEANUP_VERSION,
             "at": dt_util.utcnow().isoformat(),
-            "removed": removed,
+            "not_clothing": marked,
+            "health": health,
             "grouped": grouped,
             "split": split,
-            "classified": classified,
-            "seen": not (removed or grouped),
+            "classified": True,
+            "seen": not (marked or health or grouped),
         }
         self.meta["cleanup"] = result
         _LOGGER.info(
-            "Purchase cards cleaned up: %s non-clothing removed, %s duplicates "
-            "grouped, %s names split%s",
-            removed,
+            "Purchase cards cleaned up: %s marked not clothing, %s health items "
+            "removed, %s duplicates grouped, %s names split",
+            marked,
+            health,
             grouped,
             split,
-            "" if classified else " (not re-classified: no AI answer)",
         )
         self.hub.catalog.schedule_save()
         self.hub.notify_changed()
         return result
 
-    async def _async_cleanup_classify(self) -> tuple[int, bool]:
-        """Delete health and (clothing-only) non-apparel cards. (removed, ran)."""
-        cards = [c for c in self.cards.values() if c.get("status") in CLEANUP_STATUSES]
+    def _cleanup_failed(self, *, reset: bool) -> dict[str, Any]:
+        """No AI answer: change nothing, count the attempt; give up after retries."""
+        state = self.cleanup_state
+        # A v0.2.6 state (version 1, classified false) starts counting afresh.
+        before = 0 if reset or "attempts" not in state else int(state["attempts"])
+        attempts = before + 1
+        gave_up = attempts > CLEANUP_RETRIES
+        failed: dict[str, Any] = {
+            "version": 0,
+            "at": dt_util.utcnow().isoformat(),
+            "classified": False,
+            "attempts": attempts,
+            "gave_up": gave_up,
+        }
+        self.meta["cleanup"] = failed
+        _LOGGER.warning(
+            "Couldn't re-classify old purchase cards (attempt %s); nothing was "
+            "changed. %s",
+            attempts,
+            "Use Reclassify old cards in Laundry Hub's settings"
+            if gave_up
+            else "It will be tried again at the next check",
+        )
+        self.hub.catalog.schedule_save()
+        self.hub.notify_changed()
+        return failed
+
+    async def _async_cleanup_classify(self) -> tuple[int, int] | None:
+        """(marked not clothing, health removed), or None without AI answers."""
+        cards = [
+            c
+            for c in self.cards.values()
+            if c.get("status") in CLEANUP_STATUSES and not c.get("not_clothing")
+        ]
         if not cards:
-            return 0, True
+            return 0, 0
         entity = self.hub.wardrobe.ai_entity
         if not entity:
-            return 0, False
+            return None
         names = [str(c.get("name") or "") for c in cards]
         try:
             answers = await extract.classify(
@@ -828,25 +886,49 @@ class PurchaseInbox:
                 on_schema_error=self._schema_rejected,
             )
         except Exception as err:
-            _LOGGER.warning(
-                "Couldn't re-classify old purchase cards (%s); none were removed",
-                type(err).__name__,
-            )
-            return 0, False
-        removed = 0
+            _LOGGER.debug("Re-classifying failed: %s", type(err).__name__)
+            return None
+        marked = health = 0
         for card, answer in zip(cards, answers, strict=True):
-            health = answer.get("is_health") is True
-            not_apparel = answer.get("is_apparel") is False
-            if health or (self.clothing_only and not_apparel):
+            if answer.get("is_health") is True:
                 await self._async_delete_photos(card)
                 self.cards.pop(card["id"], None)
-                removed += 1
-        return removed, True
+                health += 1
+            elif self.clothing_only and answer.get("is_apparel") is False:
+                self._mark_not_clothing(card)
+                marked += 1
+        return marked, health
+
+    def _mark_not_clothing(self, card: dict[str, Any]) -> None:
+        """Mark a card Not clothing and dismiss it, keeping its photos (restorable)."""
+        ensure_history(card)
+        self._remember_not_clothing(card)
+        card["not_clothing"] = True
+        if card.get("status") == "new":
+            card["dismissed_units"] = int(card.get("dismissed_units") or 0) + max(
+                0, _remaining(card)
+            )
+            self._set_status(card, "matched" if _matched_units(card) else "dismissed")
+
+    def _remember_not_clothing(self, card: dict[str, Any]) -> None:
+        """Skip this product from this store from now on (Restore lifts it)."""
+        name = _norm(card.get("name"))
+        if not name:
+            return
+        blocked = self.meta.setdefault("not_clothing", {}).setdefault(
+            str(card.get("store_key")), []
+        )
+        if name not in blocked:
+            blocked.append(name)
 
     async def _async_cleanup_group(self) -> int:
         """Group duplicate new/dismissed cards. Returns how many were absorbed."""
         cards = sorted(
-            (c for c in self.cards.values() if c.get("status") in CLEANUP_STATUSES),
+            (
+                c
+                for c in self.cards.values()
+                if c.get("status") in CLEANUP_STATUSES and not c.get("not_clothing")
+            ),
             key=lambda c: (str(c.get("order_date") or ""), str(c.get("created") or "")),
         )
         kept: list[dict[str, Any]] = []
@@ -1339,13 +1421,9 @@ class PurchaseInbox:
         """Dismiss a card's remaining units; optionally remember 'not clothing'."""
         card = self.get(card_id)
         ensure_history(card)
-        if not_clothing and card.get("name"):
-            blocked = self.meta.setdefault("not_clothing", {}).setdefault(
-                str(card.get("store_key")), []
-            )
-            name = _norm(card["name"])
-            if name and name not in blocked:
-                blocked.append(name)
+        if not_clothing:
+            self._remember_not_clothing(card)
+            card["not_clothing"] = True
         card["dismissed_units"] = int(card.get("dismissed_units") or 0) + max(
             0, _remaining(card)
         )
@@ -1372,6 +1450,7 @@ class PurchaseInbox:
         if blocked and _norm(card.get("name")) in blocked:
             blocked.remove(_norm(card.get("name")))
         card["dismissed_units"] = 0
+        card.pop("not_clothing", None)
         self._set_status(card, "new")
         if not _matched_units(card):
             card["garment_id"] = None
@@ -1691,12 +1770,18 @@ class PurchaseInbox:
             "cleanup": self._cleanup_status(),
         }
 
-    def _cleanup_status(self) -> dict[str, int] | None:
-        """The cleanup result, until it has been shown once."""
-        state = self.meta.get("cleanup")
-        if not isinstance(state, dict) or state.get("seen"):
+    def _cleanup_status(self) -> dict[str, Any] | None:
+        """The cleanup result until it has been shown once, or the skipped note."""
+        state = self.cleanup_state
+        if state.get("gave_up"):
+            return {"skipped": True}
+        if not state.get("classified") or state.get("seen"):
             return None
-        return {"removed": int(state["removed"]), "grouped": int(state["grouped"])}
+        return {
+            "not_clothing": int(state.get("not_clothing") or 0),
+            "health": int(state.get("health") or 0),
+            "grouped": int(state.get("grouped") or 0),
+        }
 
     def view(self, card: dict[str, Any]) -> dict[str, Any]:
         """Card fields for the panel (no message ids, no sender address)."""
