@@ -79,12 +79,12 @@ MAX_BACKOFF = timedelta(hours=6)
 FIRST_CHECK_DELAY = 60  # seconds after setup
 CARD_FIELDS = (
     "id", "status", "store", "store_key", "sender_domain", "order_ref", "order_date",
-    "currency", "name", "brand", "color", "size", "quantity", "unit_price",
+    "currency", "name", "brand", "color", "size", "cut", "quantity", "unit_price",
     "product_url", "image_url", "photos", "garment_id", "source_message_id", "created",
     "updated",
     "status_changed",
 )  # fmt: skip
-MERGE_FIELDS = ("brand", "color", "size", "unit_price", "product_url")
+MERGE_FIELDS = ("brand", "color", "size", "cut", "unit_price", "product_url")
 _COLOR_FAMILIES = {
     "dark": {"black", "navy", "charcoal", "grey", "gray", "brown", "dark", "olive"},
     "black": {"black", "charcoal"},
@@ -161,6 +161,7 @@ class PurchaseInbox:
         self._unsubs: list[CALLBACK_TYPE] = []
         self._failures = 0
         self._next_allowed: datetime | None = None
+        self._schema_logged = False
         # Patched in tests with a fake IMAP server.
         self.client_factory: Callable[[Account], Any] | None = None
 
@@ -346,6 +347,7 @@ class PurchaseInbox:
         shop_names = [name for _key, name in opted.shopify()]
         keywords = opted.keywords()
         folders: dict[str, Any] = self.meta.setdefault("folders", {})
+        self._schema_logged = False  # "too complex" is logged once per run
         summary: dict[str, Any] = {
             "messages": 0,
             "skipped_senders": 0,
@@ -557,11 +559,24 @@ class PurchaseInbox:
                 store_name=store_name,
                 text=text,
                 clothing_only=self.clothing_only,
+                on_schema_error=self._schema_rejected,
             )
         except HomeAssistantError:
             raise
         except Exception as err:
             raise HomeAssistantError(f"{type(err).__name__}: {err}") from err
+
+    def _schema_rejected(self, structure: str, fields: int) -> None:
+        """The AI provider refused a structure as too complex: log once per run."""
+        if self._schema_logged:
+            return
+        self._schema_logged = True
+        _LOGGER.warning(
+            "The AI Task provider rejected the purchase-email structure %r "
+            "(%s fields) as too complex; using a smaller one",
+            structure,
+            fields,
+        )
 
     # --- cards -----------------------------------------------------------
 
@@ -658,6 +673,7 @@ class PurchaseInbox:
             "brand": item.brand,
             "color": item.color,
             "size": item.size,
+            "cut": item.cut,
             "quantity": item.quantity,
             "unit_price": item.unit_price,
             "product_url": item.product_url,

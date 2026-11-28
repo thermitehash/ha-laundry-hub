@@ -77,7 +77,7 @@ All types are prefixed with `laundry_hub/`. "Policy" is the access rule from the
 What the server supports and who you are.
 
 ```json
-{"api_version": 1, "integration_version": "0.2.4", "wardrobe_enabled": true,
+{"api_version": 1, "integration_version": "0.2.5", "wardrobe_enabled": true,
  "capabilities": ["phone_tap", "changes", "if_rev", "member_enroll", "url_import", "ai_describe", "purchases"],
  "role": "member", "owner": "person.alex", "app_access": "household", "rev": 412}
 ```
@@ -205,6 +205,9 @@ Errors: `unknown_photo`, and `unauthorized` for someone else's garment.
 `[{store, date, sender_domain, error}]`, newest first. They are skipped so the rest of the import
 continues. `purchases/retry_unreadable` (admin) clears the marks, reads them again and answers
 with the check summary plus `retried`.
+
+Purchase cards gain `cut` (0.2.5): the fit or cut printed in the order email ("slim", "tall"),
+or `null`. Like every added field, clients that don't know it should ignore it.
 
 ### Existing commands
 

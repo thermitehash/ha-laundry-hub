@@ -1,3 +1,39 @@
+# Laundry Hub build report: v0.2.5
+- Version: 0.2.5 / Date: 2026-11-28 / Repo: https://github.com/thermitehash/ha-laundry-hub
+- PR: https://github.com/thermitehash/ha-laundry-hub/pull/8 (not merged). v0.2.4 was merged in PR #7 (`c2a5006`) and released as `v0.2.4`.
+- Commit: `42252af` (code); this report is committed on top as a docs-only commit
+- CI: workflow **Validate** on PR #8 (see the latest run)
+
+## Summary
+- **Root cause (Heather's log):** Anthropic answered "400 … Schema is too complex" for the nested extraction structure, which had 16 optional fields, 9 of them inside the item list. Every email fell back to the minimal structure, which has no is_apparel, colour, size or price.
+- **Extraction in two shallow passes:**
+  - Pass 1 reads the order and product names: 8 fields, or names as plain strings.
+  - Pass 2 reads details for at most 10 names per call: 9 fields, or a split into is_apparel/quantity/price and colour/size/cut/link.
+  - Every field is required; an empty value means unknown.
+- **Clothing-only:** no item without is_apparel; if it can't be read, the email counts as a failed read.
+- **Schema errors** are detected and logged once per run with the field count.
+- **Budget:** `const.AI_STRUCTURE_BUDGET` is measured on the JSON schema HA sends, and every structure is tested against it.
+- **Describe** is split into two groups within the budget. `confidence` becomes `unsure`, because the key-less object only ever came back as `{}` from Claude.
+
+## Tests
+- 356 pytest (coverage 96 %).
+- New `tests/test_ai_schema.py` (16):
+  - a budget check for each of the 7 structures;
+  - the old shape is over budget;
+  - schema-error recognition;
+  - fallback order under mocked 400s, with is_apparel always present;
+  - clothing-only fails the email without is_apparel;
+  - batches of 10;
+  - the describe merge with `unsure`;
+  - the once-per-run log.
+- Call-count assertions in older tests were updated for two passes and two describe groups.
+
+## Needs a person
+- Heather's install: run a purchase check after updating. The log should no longer show "Schema is too complex"; cards should have size, colour and price; non-clothing items should be gone.
+- Re-describe one garment with Claude and check the fields are filled.
+
+---
+
 # Laundry Hub build report: v0.2.4
 - Version: 0.2.4 / Date: 2026-11-28 / Repo: https://github.com/thermitehash/ha-laundry-hub
 - PR: https://github.com/thermitehash/ha-laundry-hub/pull/7 (not merged). v0.2.3 was merged in PR #6 (`690a80f`) and released as `v0.2.3`.
