@@ -1,0 +1,23 @@
+From: Some Brand <somebrand@somebrand.narvar.com>
+To: shopper@example.com
+Subject: Your order has shipped
+Date: Tue, 24 Nov 2026 15:00:00 +0000
+Message-ID: <nv-2@narvar.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============5913649372414599075=="
+
+--===============5913649372414599075==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Plain text version.
+
+--===============5913649372414599075==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+<html><body><p>SECRET-NARVAR-BODY</p></body></html>
+
+--===============5913649372414599075==--

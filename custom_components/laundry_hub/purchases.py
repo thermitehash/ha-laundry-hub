@@ -42,6 +42,7 @@ from .const import (
     CONF_PURCHASE_CUSTOM,
     CONF_PURCHASE_EMAIL,
     CONF_PURCHASE_INTERVAL,
+    CONF_PURCHASE_SHOPIFY,
     CONF_PURCHASE_STORES,
     DEFAULT_PURCHASE_ARCHIVE_DAYS,
     DEFAULT_PURCHASE_BACKFILL,
@@ -61,7 +62,7 @@ from .mailbox import (
     open_mailbox,
 )
 from .photos import PhotoError, delete_photo, photo_dir, process_image, write_processed
-from .stores import ORDER_KEYWORDS, OptedIn
+from .stores import BY_KEY, ORDER_KEYWORDS, OptedIn, is_uniform_supplier
 
 if TYPE_CHECKING:
     from .hub import LaundryHub
@@ -77,7 +78,8 @@ FIRST_CHECK_DELAY = 60  # seconds after setup
 CARD_FIELDS = (
     "id", "status", "store", "store_key", "sender_domain", "order_ref", "order_date",
     "currency", "name", "brand", "color", "size", "quantity", "unit_price",
-    "product_url", "photos", "garment_id", "source_message_id", "created", "updated",
+    "product_url", "image_url", "photos", "garment_id", "source_message_id", "created",
+    "updated",
     "status_changed",
 )  # fmt: skip
 MERGE_FIELDS = ("brand", "color", "size", "unit_price", "product_url")
@@ -169,6 +171,7 @@ class PurchaseInbox:
         return OptedIn(
             tuple(options.get(CONF_PURCHASE_STORES) or ()),
             tuple(options.get(CONF_PURCHASE_CUSTOM) or ()),
+            tuple(options.get(CONF_PURCHASE_SHOPIFY) or ()),
         )
 
     @property
@@ -211,7 +214,9 @@ class PurchaseInbox:
     def active(self) -> bool:
         """Checks run: wardrobe on, connected, at least one sender opted in."""
         return (
-            self.hub.wardrobe.enabled and self.connected and bool(self.opted.domains())
+            self.hub.wardrobe.enabled
+            and self.connected
+            and bool(self.opted.domains() or self.opted.shopify())
         )
 
     @property
@@ -331,6 +336,7 @@ class PurchaseInbox:
     async def _async_run(self, account: Account) -> dict[str, Any]:
         opted = self.opted
         domains = opted.domains()
+        shop_names = [name for _key, name in opted.shopify()]
         keywords = opted.keywords()
         folders: dict[str, Any] = self.meta.setdefault("folders", {})
         summary: dict[str, Any] = {
@@ -351,17 +357,19 @@ class PurchaseInbox:
                 uids: list[int] = []  # only mail that arrives from now on
             elif fresh:
                 uids = await box.search_senders(domains, self.backfill_days, keywords)
+                uids += await box.search_shopify(
+                    shop_names, self.backfill_days, keywords
+                )
             else:
                 assert isinstance(state, dict)
                 last_uid = int(state.get("last_uid") or 0)
                 checked = dt_util.parse_datetime(str(state.get("checked") or ""))
                 days = 2 if checked is None else (dt_util.utcnow() - checked).days + 2
-                uids = [
-                    u
-                    for u in await box.search_senders(domains, max(7, days), keywords)
-                    if u > last_uid
-                ]
-            uids = sorted(uids)[:MAX_MESSAGES_PER_RUN]
+                window = max(7, days)
+                found = await box.search_senders(domains, window, keywords)
+                found += await box.search_shopify(shop_names, window, keywords)
+                uids = [u for u in found if u > last_uid]
+            uids = sorted(set(uids))[:MAX_MESSAGES_PER_RUN]
             processed = await self._async_process(box, uids, opted, keywords, summary)
             highest = max([last_uid, *processed])
             if fresh and self.backfill_days <= 0:
@@ -396,7 +404,9 @@ class PurchaseInbox:
         seen: list[str] = self.meta.setdefault("seen_ids", [])
         seen_set = set(seen)
         for header in sorted(await box.fetch_headers(uids), key=lambda h: h.uid):
-            match = opted.match(header.sender_domain)
+            match = opted.match(
+                header.sender_domain, header.sender_name, header.subject
+            )
             if match is None:
                 summary["skipped_senders"] += 1  # body never fetched
                 done.append(header.uid)
@@ -469,7 +479,7 @@ class PurchaseInbox:
         self, order: extract.Order, match: tuple[str, str], header: Header
     ) -> tuple[int, int]:
         """Create cards, or update a known order's cards. Returns (new, updated)."""
-        store_key, store_name = match
+        store_key = match[0]
         existing = [
             c
             for c in self.cards.values()
@@ -480,10 +490,20 @@ class PurchaseInbox:
         now = dt_util.utcnow().isoformat()
         if existing:
             updated = 0
+            added = 0
+            single = len(order.items) == 1
             for item in order.items:
-                found = self._find_card(existing, item.name)
+                found = self._find_card(existing, item.name, allow_single=single)
                 if found is None:
-                    continue  # a shipping email never adds cards to a known order
+                    # Partial shipment: an item not on any card of this order gets
+                    # its own card, but only if it is (or may be) clothing.
+                    if item.is_apparel and not self._blocked(store_key, item.name):
+                        card_new = await self._async_new_card(
+                            order, item, match, header
+                        )
+                        existing.append(card_new)
+                        added += 1
+                    continue
                 card = found
                 changed = False
                 for key in MERGE_FIELDS:
@@ -503,53 +523,69 @@ class PurchaseInbox:
                     if photo:
                         card["photos"] = [photo]
                         changed = True
+                if item.image_url and not card.get("image_url"):
+                    card["image_url"] = item.image_url
                 if changed:
                     card["updated"] = now
                     updated += 1
             self.hub.catalog.schedule_save()
-            return 0, updated
+            return added, updated
         new = 0
-        received = header.date.date() if header.date else None
         for item in order.items:
             if self._blocked(store_key, item.name):
                 continue
-            card_id = ulid_now()
-            new_card: dict[str, Any] = {
-                "id": card_id,
-                "status": "new",
-                "store": store_name,
-                "store_key": store_key,
-                "sender_domain": header.sender_domain,
-                "order_ref": order.order_ref,
-                "order_date": (
-                    order.order_date or received or date.today()
-                ).isoformat(),
-                "currency": order.currency or self.hass.config.currency,
-                "name": item.name,
-                "brand": item.brand,
-                "color": item.color,
-                "size": item.size,
-                "quantity": item.quantity,
-                "unit_price": item.unit_price,
-                "product_url": item.product_url,
-                "photos": [],
-                "garment_id": None,
-                "source_message_id": header.message_id,
-                "created": now,
-                "updated": now,
-                "status_changed": now,
-            }
-            if item.image_url:
-                photo = await self._async_photo(card_id, item.image_url)
-                if photo:
-                    new_card["photos"] = [photo]
-            self.cards[card_id] = new_card
+            await self._async_new_card(order, item, match, header)
             new += 1
         self.hub.catalog.schedule_save()
         return new, 0
 
+    async def _async_new_card(
+        self,
+        order: extract.Order,
+        item: extract.Item,
+        match: tuple[str, str],
+        header: Header,
+    ) -> dict[str, Any]:
+        """Create (and store) one card for an item."""
+        store_key, store_name = match
+        now = dt_util.utcnow().isoformat()
+        received = header.date.date() if header.date else None
+        card_id = ulid_now()
+        new_card: dict[str, Any] = {
+            "id": card_id,
+            "status": "new",
+            "store": store_name,
+            "store_key": store_key,
+            "sender_domain": header.sender_domain,
+            "order_ref": order.order_ref,
+            "order_date": (order.order_date or received or date.today()).isoformat(),
+            "currency": order.currency or self.hass.config.currency,
+            "name": item.name,
+            "brand": item.brand,
+            "color": item.color,
+            "size": item.size,
+            "quantity": item.quantity,
+            "unit_price": item.unit_price,
+            "product_url": item.product_url,
+            "image_url": item.image_url,
+            "photos": [],
+            "garment_id": None,
+            "source_message_id": header.message_id,
+            "created": now,
+            "updated": now,
+            "status_changed": now,
+        }
+        if item.image_url:
+            photo = await self._async_photo(card_id, item.image_url)
+            if photo:
+                new_card["photos"] = [photo]
+        self.cards[card_id] = new_card
+        return new_card
+
     @staticmethod
-    def _find_card(cards: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
+    def _find_card(
+        cards: list[dict[str, Any]], name: str, *, allow_single: bool = True
+    ) -> dict[str, Any] | None:
         wanted = _norm(name)
         for card in cards:
             if _norm(card.get("name")) == wanted:
@@ -558,7 +594,8 @@ class PurchaseInbox:
             have = _norm(card.get("name"))
             if have and wanted and (have in wanted or wanted in have):
                 return card
-        return cards[0] if len(cards) == 1 else None
+        # One card and an email about one item: the store renamed it slightly.
+        return cards[0] if allow_single and len(cards) == 1 else None
 
     async def _async_photo(self, card_id: str, url: str) -> str | None:
         """Download a card photo; None (card kept without photo) on any failure."""
@@ -585,8 +622,11 @@ class PurchaseInbox:
         for card in list(self.cards.values()):
             if card.get("status") != "new":
                 continue
-            created = dt_util.parse_datetime(str(card.get("created") or ""))
-            if created is not None and created < cutoff:
+            # A restored card counts from when it was restored, not created.
+            since = dt_util.parse_datetime(
+                str(card.get("status_changed") or card.get("created") or "")
+            )
+            if since is not None and since < cutoff:
                 self._set_status(card, "archived")
                 await self._async_delete_photos(card)
 
@@ -629,6 +669,10 @@ class PurchaseInbox:
                 {"label": card["size"], "system": "other"}
             )
             provenance["size"] = "import"
+        if is_uniform_supplier(card.get("store_key")):
+            # Preset only: the user can untick it in the garment's details.
+            garment.uniform = True
+            garment.wear_for = "work"
         for filename in card.get("photos") or []:
             if len(garment.photos) >= wardrobe.photo_limit():
                 break
@@ -656,6 +700,87 @@ class PurchaseInbox:
         self.hub.catalog.schedule_save()
         self.hub.notify_changed()
         return card
+
+    async def async_restore(self, card_id: str) -> dict[str, Any]:
+        """Move a dismissed or archived card back to the inbox.
+
+        Its photo was deleted when it was dismissed or archived, so it is
+        fetched again (once, through the pinned pipeline) from the stored
+        image link, if there is one. A "Not clothing" rule for it is lifted.
+        """
+        self.hub.wardrobe.require()
+        card = self.get(card_id)
+        if card.get("status") not in ("dismissed", "archived"):
+            raise _err("purchase_not_archived", "That purchase card isn't archived")
+        blocked = (self.meta.get("not_clothing") or {}).get(str(card.get("store_key")))
+        if blocked and _norm(card.get("name")) in blocked:
+            blocked.remove(_norm(card.get("name")))
+        self._set_status(card, "new")
+        card["garment_id"] = None
+        if not card.get("photos") and card.get("image_url"):
+            photo = await self._async_photo(card["id"], str(card["image_url"]))
+            if photo:
+                card["photos"] = [photo]
+        self.hub.catalog.schedule_save()
+        self.hub.notify_changed()
+        return card
+
+    def archived(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Dismissed and auto-archived cards, newest first."""
+        cards = [
+            c
+            for c in self.cards.values()
+            if c.get("status") in ("dismissed", "archived")
+        ]
+        cards.sort(key=lambda c: str(c.get("status_changed") or ""), reverse=True)
+        return cards[:limit]
+
+    def uniform_offers(self) -> list[dict[str, Any]]:
+        """Uniform-supplier stores with matched garments not yet marked uniform.
+
+        Offered once per store: accepting or declining records the store.
+        """
+        done = set(self.meta.get("uniform_offers_done") or [])
+        offers: dict[str, dict[str, Any]] = {}
+        for card in self.cards.values():
+            key = str(card.get("store_key") or "")
+            if card.get("status") != "matched" or key in done:
+                continue
+            if not is_uniform_supplier(key):
+                continue
+            garment = self.hub.catalog.garments.get(str(card.get("garment_id")))
+            if garment is None or garment.uniform:
+                continue
+            offer = offers.setdefault(
+                key, {"store_key": key, "store": BY_KEY[key].name, "count": 0}
+            )
+            offer["count"] += 1
+        return sorted(offers.values(), key=lambda o: o["store"])
+
+    def mark_store_uniform(self, store_key: str, *, accept: bool = True) -> int:
+        """Accept (mark matched garments uniform) or decline a store's offer."""
+        self.hub.wardrobe.require()
+        if not is_uniform_supplier(store_key):
+            raise _err("not_uniform_supplier", "That store isn't a uniform supplier")
+        count = 0
+        if accept:
+            for card in self.cards.values():
+                if (
+                    card.get("status") != "matched"
+                    or card.get("store_key") != store_key
+                ):
+                    continue
+                garment = self.hub.catalog.garments.get(str(card.get("garment_id")))
+                if garment is not None and not garment.uniform:
+                    garment.uniform = True
+                    garment.wear_for = "work"
+                    count += 1
+        done: list[str] = self.meta.setdefault("uniform_offers_done", [])
+        if store_key not in done:
+            done.append(store_key)
+        self.hub.catalog.schedule_save()
+        self.hub.notify_changed()
+        return count
 
     async def async_delete_all(self) -> int:
         """Delete every card and its photos (Disconnect → delete cards)."""
@@ -703,7 +828,7 @@ class PurchaseInbox:
         return {
             "connected": account is not None,
             "provider": account.provider if account else None,
-            "stores": len(self.opted.stores()) + len(self.opted.custom_domains),
+            "stores": self.opted.count(),
             "last_check": self.meta.get("last_check"),
             "last_error": self.meta.get("last_error"),
             "new_cards": len(self.unmatched()),
@@ -711,11 +836,13 @@ class PurchaseInbox:
 
     def view(self, card: dict[str, Any]) -> dict[str, Any]:
         """Card fields for the panel (no message id, no sender address)."""
-        return {
+        view = {
             key: card.get(key)
             for key in CARD_FIELDS
-            if key not in ("source_message_id", "sender_domain")
+            if key not in ("source_message_id", "sender_domain", "image_url")
         }
+        view["uniform_supplier"] = is_uniform_supplier(card.get("store_key"))
+        return view
 
 
 async def async_count_store_emails(
@@ -725,14 +852,28 @@ async def async_count_store_emails(
 ) -> dict[str, int]:
     """Matching emails per catalog store in the last ``days`` days.
 
-    One read-only search per store; only UIDs come back (no headers, no
-    bodies) and only the counts are returned. Used by the options flow.
+    One read-only search per store; only UIDs come back and only the counts
+    are returned. Shopify shops share one sender, so their results are
+    narrowed by reading headers (never bodies) and checking the shop name in
+    the display name or subject. Used by the options flow.
     """
-    from .stores import CATALOG  # noqa: PLC0415
+    from .stores import CATALOG, OptedIn  # noqa: PLC0415
 
     counts: dict[str, int] = {}
     async with open_mailbox(account, factory) as box:
         for store in CATALOG:
+            if store.kind == "shopify":
+                uids = await box.search_shopify(
+                    [store.name], days, list(store.keywords)
+                )
+                opted = OptedIn((store.key,), ())
+                headers = await box.fetch_headers(uids) if uids else []
+                counts[store.key] = sum(
+                    1
+                    for h in headers
+                    if opted.match(h.sender_domain, h.sender_name, h.subject)
+                )
+                continue
             uids = await box.search_senders(
                 list(store.domains), days, list(store.keywords)
             )

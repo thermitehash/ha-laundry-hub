@@ -253,3 +253,24 @@ def test_needs_bump() -> None:
     assert bump.needs_bump(["esphome/tap-station/components/st25r_i2c/st25r_i2c.cpp"])
     assert bump.needs_bump(["custom_components/laundry_hub/strings.json"])
     assert not bump.needs_bump(["docs/releases/v0.1.2.md", "README.md", "hacs.json"])
+
+
+def test_ha_internals_check() -> None:
+    import importlib.util  # noqa: PLC0415
+
+    spec = importlib.util.spec_from_file_location(
+        "check_ha_internals", ROOT / "script" / "check_ha_internals.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    import homeassistant.components.media_source.models as models  # noqa: PLC0415
+    import homeassistant.helpers.integration_platform as platform  # noqa: PLC0415
+
+    good_platform = Path(platform.__file__).read_text()
+    good_models = Path(models.__file__).read_text()
+    assert module.check(good_platform, good_models) == []
+    assert module.check("x = 1", good_models) == ["LazyIntegrationPlatforms is gone"]
+    renamed = good_platform.replace("self._processed", "self._cache")
+    assert len(module.check(renamed, "")) == 3
+    assert module.main(["x", platform.__file__, models.__file__]) == 0

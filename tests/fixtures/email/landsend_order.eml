@@ -1,0 +1,27 @@
+From: Lands' End <orders@landsend.com>
+To: shopper@example.com
+Subject: Your Lands' End order LE-7781 is confirmed
+Date: Wed, 18 Nov 2026 15:00:00 +0000
+Message-ID: <le-1@landsend.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============0381249886915797091=="
+
+--===============0381249886915797091==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Plain text version.
+
+--===============0381249886915797091==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Order LE-7781 placed November 18, 2026</p>
+<p><img src=3D"https://s7.landsend.com/is/image/turtleneck.jpg"> Women's Cott=
+on Rib Turtleneck, Navy, M $29.95</p>
+<p><img src=3D"https://s7.landsend.com/is/image/chinos.jpg"> Women's Mid Rise=
+ Chino Pants, Khaki, 10 $49.95</p></body></html>
+
+--===============0381249886915797091==--

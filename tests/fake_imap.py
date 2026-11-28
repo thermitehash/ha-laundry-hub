@@ -17,6 +17,7 @@ from email.message import Message
 from email.policy import compat32
 from email.utils import parseaddr, parsedate_to_datetime
 from pathlib import Path
+import quopri
 import re
 from typing import Any
 
@@ -162,6 +163,12 @@ class FakeImap:
     def _date(self, uid: int) -> datetime:
         return parsedate_to_datetime(str(self._parsed(uid)["Date"]))
 
+    def _text(self, uid: int) -> str:
+        """Whole message, transfer encoding undone (Gmail searches decoded text)."""
+        return (
+            quopri.decodestring(self.messages[uid]).decode("utf-8", "replace").lower()
+        )
+
     def _subject(self, uid: int) -> str:
         return str(self._parsed(uid)["Subject"]).lower()
 
@@ -174,9 +181,18 @@ class FakeImap:
         args = list(criteria)
         if args and args[0] == "X-GM-RAW":
             query = args[1].strip('"').replace('\\"', '"')
-            senders = re.search(r"from:\(([^)]*)\)", query)
+            senders = re.search(r"from:\(([^)]*)\)", query) or re.search(
+                r"from:(\S+)", query
+            )
             days = re.search(r"newer_than:(\d+)d", query)
             subject = re.search(r"subject:\((.*)\)", query)
+            # Bare terms in parentheses (Shopify shop names) match anywhere.
+            terms_match = re.search(r"\S+ \(([^)]*)\) newer_than", query)
+            terms = (
+                [t.strip('"').lower() for t in terms_match.group(1).split(" OR ")]
+                if terms_match
+                else []
+            )
             domains = senders.group(1).split(" OR ") if senders else []
             words = (
                 [w.strip('"').lower() for w in re.split(r" OR ", subject.group(1))]
@@ -190,6 +206,7 @@ class FakeImap:
                 if any(d in self._from(u) for d in domains)
                 and (cutoff is None or self._date(u) >= cutoff)
                 and (not words or any(w in self._subject(u) for w in words))
+                and (not terms or any(t in self._text(u) for t in terms))
             ]
         else:
             while args:

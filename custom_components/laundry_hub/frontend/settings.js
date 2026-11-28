@@ -3,6 +3,21 @@
 
 const CONFIG_PATH = "/config/integrations/integration/laundry_hub";
 
+// Read-only status of the purchase-email connection; changes happen in Configure.
+function purchaseRow(ctx) {
+  const { lib, data } = ctx;
+  const p = data.purchases;
+  const rows = p.connected
+    ? `<div class="kv"><span>Status</span><span class="state ok">Connected</span></div>
+       <div class="kv"><span>Stores</span><span>${p.stores}</span></div>
+       <div class="kv"><span>Last check</span><span>${lib.esc(lib.timeAgo(p.last_check))}</span></div>
+       <div class="kv"><span>New cards</span><span>${p.new_cards}</span></div>
+       <div class="kv"><span>Last problem</span><span class="${p.last_error ? "state problem" : ""}">${lib.esc(p.last_error || "None")}</span></div>`
+    : `<div class="kv"><span>Status</span><span class="state unknown">Not connected</span></div>`;
+  return `<h2 class="section-label">Purchase emails</h2><div class="card stack" data-section="purchase-emails">${rows}
+    <a class="link" href="${CONFIG_PATH}" data-act="openConfig">${p.connected ? "Change in Configure" : "Connect in Configure"}</a></div>`;
+}
+
 export function render(ctx) {
   const { lib, data } = ctx;
   const zoneRows = (zones) => zones.map((z) => `
@@ -30,6 +45,7 @@ export function render(ctx) {
             <p class="hint" style="margin:0">When describing a garment, its photos and details are sent to the AI provider you chose.</p>`
             : `<p class="hint" style="margin:0">Turn on Wardrobe in the integration options to add photos, purchase details and AI descriptions.</p>`}
         </div>
+        ${w.enabled && data.purchases ? purchaseRow(ctx) : ""}
         ${owners.length ? `<h2 class="section-label">People</h2><div class="card stack">${owners.map(([id, s]) => `
           <form data-submit="saveOwner" data-owner="${lib.esc(id)}" class="row">
             <span class="avatar lg">${lib.esc(lib.initials(ctx.personName(id)))}</span>

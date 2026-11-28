@@ -137,10 +137,12 @@
         "description": "Choose the stores whose order emails should become purchase cards. Nothing is read from stores you don't choose. {count_note} The store list is best effort; add any other store's sender domain below.",
         "data": {
           "purchase_stores": "Stores",
-          "purchase_custom_domains": "Custom sender domains"
+          "purchase_custom_domains": "Custom sender domains",
+          "purchase_shopify_names": "Shopify stores by name"
         },
         "data_description": {
-          "purchase_custom_domains": "Comma-separated, for example shop.example.com, mystore.com. Subdomains match too."
+          "purchase_custom_domains": "Comma-separated, for example shop.example.com, mystore.com. Subdomains match too. Shared senders (narvar.com, shopifyemail.com) can't be added on their own: add the brand's own Narvar subdomain, or use Shopify stores by name.",
+          "purchase_shopify_names": "Comma-separated shop names, for example First Tactical. Shops on Shopify all send from the same address, so an email counts only when the name appears in the sender's name or the subject."
         }
       },
       "email_options": {
@@ -173,8 +175,9 @@
       "invalid_auth": "Google rejected the password — use an app password, not your normal password.",
       "cannot_connect": "Couldn't connect to the email server. Check the address and your network.",
       "folder_not_found": "That folder doesn't exist on the server.",
-      "invalid_domain": "One of the sender domains isn't valid (use something like shop.example.com).",
-      "no_stores": "Choose at least one store or add a sender domain."
+      "invalid_domain": "One of the sender domains isn't valid, or is a shared sender like narvar.com or shopifyemail.com (use something like shop.example.com).",
+      "no_stores": "Choose at least one store or add a sender domain.",
+      "invalid_shop_name": "Each shop name needs 2 to 60 characters."
     },
     "abort": {
       "not_loaded": "Laundry Hub isn't loaded.",
@@ -449,6 +452,12 @@
     },
     "purchase_used": {
       "message": "That purchase card was already used."
+    },
+    "purchase_not_archived": {
+      "message": "That purchase card isn't archived."
+    },
+    "not_uniform_supplier": {
+      "message": "That store isn't a uniform supplier."
     }
   },
   "issues": {

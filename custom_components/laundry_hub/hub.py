@@ -918,6 +918,10 @@ class LaundryHub:
                         self.purchases.view(c)
                         for c in rank_cards(self.purchases.unmatched(), set(), None)
                     ],
+                    "archived": [
+                        self.purchases.view(c) for c in self.purchases.archived()
+                    ],
+                    "uniform_offers": self.purchases.uniform_offers(),
                 }
                 if self.wardrobe.enabled
                 else None

@@ -1,0 +1,28 @@
+From: Lands' End <landsend@landsend.narvarnotify.com>
+To: shopper@example.com
+Subject: Your Lands' End order has shipped
+Date: Mon, 23 Nov 2026 15:00:00 +0000
+Message-ID: <le-3@landsend.narvar.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============3284932622628691037=="
+
+--===============3284932622628691037==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Plain text version.
+
+--===============3284932622628691037==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Shipment 2 of 2 for order LE-7781 is on its way.</p>
+<p>Women's Mid Rise Chino Pants, Khaki, 10</p>
+<p><img src=3D"https://s7.landsend.com/is/image/scarf.jpg"> Cashmere Scarf, R=
+ed $59.95</p>
+<p><img src=3D"https://s7.landsend.com/is/image/mug.jpg"> Lands' End Travel M=
+ug $14.95</p></body></html>
+
+--===============3284932622628691037==--

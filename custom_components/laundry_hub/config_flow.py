@@ -37,6 +37,7 @@ from .const import (
     CONF_PURCHASE_CUSTOM,
     CONF_PURCHASE_EMAIL,
     CONF_PURCHASE_INTERVAL,
+    CONF_PURCHASE_SHOPIFY,
     CONF_PURCHASE_STORES,
     CONF_STATION_DEVICES,
     CONF_WARDROBE_ENABLED,
@@ -65,7 +66,7 @@ from .mailbox import (
     account_from_data,
     test_login,
 )
-from .stores import CATALOG, StoreInfo, parse_domains
+from .stores import CATALOG, StoreInfo, parse_domains, parse_names
 
 if TYPE_CHECKING:
     from .hub import LaundryHub
@@ -393,8 +394,13 @@ class LaundryHubOptionsFlow(OptionsFlow):
         hub = self._hub
         if not self.config_entry.data.get(CONF_PURCHASE_EMAIL):
             return "not connected"
-        stores = len(self._current.get(CONF_PURCHASE_STORES) or []) + len(
-            self._current.get(CONF_PURCHASE_CUSTOM) or []
+        stores = sum(
+            len(self._current.get(key) or [])
+            for key in (
+                CONF_PURCHASE_STORES,
+                CONF_PURCHASE_CUSTOM,
+                CONF_PURCHASE_SHOPIFY,
+            )
         )
         parts = [f"connected ({stores} stores)"]
         if hub is not None:
@@ -438,6 +444,7 @@ class LaundryHubOptionsFlow(OptionsFlow):
         keys = (
             CONF_PURCHASE_STORES,
             CONF_PURCHASE_CUSTOM,
+            CONF_PURCHASE_SHOPIFY,
             CONF_PURCHASE_INTERVAL,
             CONF_PURCHASE_BACKFILL,
             CONF_PURCHASE_CLOTHING_ONLY,
@@ -532,14 +539,18 @@ class LaundryHubOptionsFlow(OptionsFlow):
         if user_input is not None:
             stores = [k for k in user_input.get(CONF_PURCHASE_STORES, []) if k]
             custom, invalid = parse_domains(user_input.get(CONF_PURCHASE_CUSTOM, ""))
+            names, bad_names = parse_names(user_input.get(CONF_PURCHASE_SHOPIFY, ""))
             if invalid:
                 errors[CONF_PURCHASE_CUSTOM] = "invalid_domain"
-            elif not stores and not custom:
+            elif bad_names:
+                errors[CONF_PURCHASE_SHOPIFY] = "invalid_shop_name"
+            elif not stores and not custom and not names:
                 errors["base"] = "no_stores"
             else:
                 self._pending = {
                     CONF_PURCHASE_STORES: stores,
                     CONF_PURCHASE_CUSTOM: custom,
+                    CONF_PURCHASE_SHOPIFY: names,
                 }
                 if self._account is None:  # editing stores only
                     return self.async_create_entry(
@@ -569,6 +580,11 @@ class LaundryHubOptionsFlow(OptionsFlow):
             if user_input
             else ", ".join(current.get(CONF_PURCHASE_CUSTOM) or [])
         ) or ""
+        shop_text = (
+            user_input.get(CONF_PURCHASE_SHOPIFY)
+            if user_input
+            else ", ".join(current.get(CONF_PURCHASE_SHOPIFY) or [])
+        ) or ""
         schema = vol.Schema(
             {
                 vol.Optional(CONF_PURCHASE_STORES, default=list(chosen)): (
@@ -585,6 +601,9 @@ class LaundryHubOptionsFlow(OptionsFlow):
                 ),
                 vol.Optional(
                     CONF_PURCHASE_CUSTOM, description={"suggested_value": custom_text}
+                ): selector.TextSelector(),
+                vol.Optional(
+                    CONF_PURCHASE_SHOPIFY, description={"suggested_value": shop_text}
                 ): selector.TextSelector(),
             }
         )

@@ -1,0 +1,25 @@
+From: First Tactical <store@t.shopifyemail.com>
+To: shopper@example.com
+Subject: Order #FT1001 confirmed
+Date: Sun, 22 Nov 2026 15:00:00 +0000
+Message-ID: <ft-1@shopifyemail.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============1440541294146463576=="
+
+--===============1440541294146463576==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Plain text version.
+
+--===============1440541294146463576==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Thank you for your order #FT1001.</p><p><img src=3D"https://cd=
+n.shopify.com/s/files/ft/vertex.jpg"> V2 Tactical Pant, Black, 34x32 $69.99</=
+p></body></html>
+
+--===============1440541294146463576==--

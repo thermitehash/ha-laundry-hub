@@ -1,0 +1,25 @@
+From: Blauer <orders@web.blauer.com>
+To: shopper@example.com
+Subject: Blauer order B-3301 confirmation
+Date: Sat, 21 Nov 2026 15:00:00 +0000
+Message-ID: <bl-1@blauer.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative;
+ boundary="===============8038237483007801880=="
+
+--===============8038237483007801880==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Plain text version.
+
+--===============8038237483007801880==
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: quoted-printable
+MIME-Version: 1.0
+
+<html><body><p>Order B-3301</p><p><img src=3D"https://www.blauer.com/img/8703=
+.jpg"> 8703 Long Sleeve Cotton Blend Shirt, French Blue, L $64.00</p></body><=
+/html>
+
+--===============8038237483007801880==--
