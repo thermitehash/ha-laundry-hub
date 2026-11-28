@@ -71,6 +71,25 @@ number of garments. Move them first with **Laundry Hub panel → Garments → Bu
 If an in-use entry is deleted through the generic subentry menu (which cannot be blocked),
 Laundry Hub restores it immediately and raises a repair issue that explains what to do.
 
+## Garments without a tag (0.2.8)
+
+A garment doesn't need an NFC tag. In **Add**, choose **No tag (wardrobe only)**, or use
+**New garment from this** on a purchase card. Untagged garments have the same photos,
+details, AI description and fit as any other, with a small "No tag" badge and a
+**Tagged / No tag** filter in Closet.
+
+- **Wore it** is on every garment (tagged or not), with **Undo** for 10 seconds; the
+  garment shows how often and when it was last worn.
+- Their laundry state is set by hand from the garment: **To laundry** and **Clean / put
+  away**. Laundry Hub never guesses where they are, never calls them missing, and leaves
+  them out of the closet and bin counts.
+- **Attach tag** later: the next unknown tap at any station (or from the app) within
+  2 minutes links to that garment. **Move tag here** takes a tag from another garment: pick
+  it by name and photo, confirm once (typing a tag ID is under *Advanced*). **Replace tag** (lost tag) and **Remove tag** (back to
+  untagged; history is kept) are on every tagged garment.
+- An unknown tag's notification and the Add page's *Seen recently* list also offer
+  **Link to an untagged garment…**.
+
 ## Laundry Hub panel
 
 The **Laundry Hub** sidebar panel (at `/laundry`) is admin-only and built for phones first: a bottom tab bar on
@@ -158,6 +177,8 @@ deletes the stored address and password and asks whether to keep or delete exist
   row of cards. Tapping one fills in the name, brand, size, purchase details and photo (the
   photo is copied, so dismissing the card later never deletes it). *None of these* carries
   on as normal. Nothing is ever matched automatically.
+- **Finding them:** Home shows "Purchases · N to review" whenever cards are waiting, the
+  Closet tab shows the count, and `/laundry?tab=closet&view=purchases` opens Purchases.
 - **Closet → Purchases:** one card per item. Emails about the same order (confirmation,
   shipping, delivery) never add up; buying the same item again adds to the card's quantity
   ("×2") with its own line in the card's purchase history. Each card offers *Match to

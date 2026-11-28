@@ -1,3 +1,94 @@
+# Decisions (v0.2.8)
+
+Choices made while building v0.2.8 without asking. Each line: decision, then reason.
+
+1. **No data migration was needed.**
+   - Every garment already had its own ULID `id`, independent of its tags, since the v0.2 store. `uids` is a list, and an untagged garment simply has an empty one.
+   - Ids, storage keys, photo filenames (which use the id), recent taps, `wear_log` and entity unique_ids are untouched. There are no per-garment entities, and the sensors' unique_ids don't depend on garments.
+   - Two new stored fields, `state_source` and `state_updated`, default to null. A v0.2.7 store loads unchanged, and the test checks that every other stored key is identical after a reload.
+2. **Old uid-style refs keep working everywhere** (`resolve_garment` already accepted an id or a tag UID). Views add `tagged`, `state_source`, `state_updated` and `state_confidence`. This is additive, so `api_version` stays 1. Capability: `untagged_garments`.
+3. **"Never claim a location you don't know":**
+   - An untagged garment's `location` is always null. `put_away` with a null location means "clean, somewhere", shown as "Put away".
+   - The validity rules and the store's auto-repair accept that for untagged garments only. Creating an untagged garment with a location is refused (`untagged_location`).
+   - Removing a garment's last tag clears its location, since no station can vouch for it any more.
+4. **Untagged garments are never "missing"** (no station can see them), and they're left out of `count()` and `per_zone()`, so they never appear in the closet, in-wash or drying sensors or the bin counts. Unknown-tag flows only ever deal with tags, so untagged garments don't affect them.
+5. **Manual actions:**
+   - `garment/manual_state` takes `to_laundry` (in the wash) or `put_away` (clean / put away). It works on untagged garments only (`garment_has_tag`); a tagged garment changes state through its taps.
+   - Each action is written to recent taps as "By hand", so the history shows it.
+   - Members may use it on their own garments.
+6. **`state_confidence` (0..1):**
+   - Tagged garments: 1.
+   - Untagged: 1 for 2 days after a manual update, then fading linearly to 0.25 at 30 days. Never set: 0.5.
+   - The constants live in hub.py. The panel shows "may be out of date" once it drops below 1.
+7. **Linking a tag:**
+   - The brief's "existing link session" doesn't exist in the code, so `start_link` adds a small server-side one: one session at a time (a new one replaces the old), lasting 2 minutes.
+   - The next *unknown* tap at any station, or a member's/admin's phone tap, links to that garment instead of becoming an unknown tag (no notification).
+   - A known tag's tap is processed normally, never moved silently. Moving a tag happens only through the explicit `uid` + `move` path ("Move tag here").
+   - A member's session is completed only by an admin's or that member's own phone tap; a station tap completes any session.
+8. **Attach by typed ID:** `garment/attach_tag` with `uid` attaches immediately and refuses a tag on another garment with `tag_in_use`, which names that garment. `move: true` moves the tag, and the other garment may become untagged. `replace: true` removes the garment's current tags first.
+9. **"Remove tag" removes all tags** (back to untagged; recent taps and the wear log are kept). `uid` removes just one. The old "never the last tag" rule now applies only to `garment/update remove_uid`, which is unchanged.
+10. **Link candidates:**
+    - The tag carries no information about the garment, so ranking uses who tapped it: that member's owner's untagged garments come first, then the newest. Type and colour are shown on each row so similar garments are easy to spot.
+    - Only active (not archived) untagged garments are offered. Members get only their own.
+11. **The unknown-tag notification** adds a second action, "Link to an untagged garment…" (`?page=link&uid=…`), only when untagged garments exist. The panel opens the picker from that link.
+12. **"New garment from this"** creates an untagged garment named after the card, using the first wash bin and dry type and the card's assigned owner. It matches one unit of the card, then opens the garment for editing.
+13. **The panel's quick actions and tag controls live on the garment's detail card.** The Closet grid shows the "No tag" badge, and Tagged / No tag filter chips appear once any untagged garment exists.
+14. **Member rights for tags:**
+    - A typed tag must be the unknown tag the member just tapped with their phone, or a tag already on another of their own garments.
+    - Moving a tag from someone else's garment is refused.
+    - Creating without a tag skips the "recent tap" requirement; the owner is still forced.
+15. **"Not clothing" keeps the card's photos**; a plain Dismiss and auto-archiving still delete them, as before.
+16. **New purge:** archived and dismissed cards (with their photos) are deleted 365 days after they were archived or dismissed. The brief says photos go when an archived card is purged, but no purge existed.
+    - The "Not clothing" rules and the seen Message-IDs stay, so a purged card never comes back.
+    - Matched cards are never purged.
+17. **The v0.2.6 release notes file gets the "Install v0.2.7 or later instead" line under its title**: line 1 must stay the title for the version check. The published v0.2.6 release page isn't regenerated by the Release workflow (it skips existing releases), and no available tool edits a release body.
+18. **One `lib.errorText(err, fallback)` turns every error into text**: the loader, `ws()`, uploads, the action dispatcher and the tag-conflict path in the detail view.
+    - Order: `message`, then `error.message`, then `body.message`, then known codes, then `Error: <code>`, then short JSON (max 120 characters), then the fallback.
+    - Known codes: 1 "Can't connect to Home Assistant", 2 "Home Assistant needs you to log in again", 3 "Lost connection to Home Assistant", `unknown_command` and `not_loaded` "Laundry Hub is still starting".
+    - It never returns a string containing "[object Object]".
+    - Every failure is logged with `console.error("Laundry Hub: <command> failed", rawError)`, handled errors such as `tag_in_use` included, because you asked for every error to be logged. The smoke test therefore ignores the panel's own "Laundry Hub: …" log lines and still fails on any other console or page error.
+19. **The first load is single-flight:**
+    - `_load()` returns the in-flight promise to every caller (`_init`, the "ready" listener, `_subscribe` after a reconnect, change events), so two loads never overlap and overlapping callers share one `laundry_hub/data` call.
+    - Before the first success, a transient error (codes 1/3, `unknown_command`, `not_loaded`) or one that arrives while reconnecting shows no toast. "Loading…" stays, and it retries with backoff 1, 2, 4, … up to 30 s.
+    - When the backoff reaches 30 s, one clear message appears with "Try again", and retries continue.
+    - A non-transient first-load error shows the message card (no toast). Errors after the first success are toasts, as before.
+20. **Purchases on Home:**
+    - A top card "Purchases · N to review", with 3 thumbnails, appears whenever waiting cards exist (wardrobe on). It opens Closet → Purchases.
+    - The Closet tab shows the same count as a badge. Inside Closet, the Purchases chip was already the first chip, with its count.
+    - `?tab=closet&view=purchases` opens Purchases, and the panel writes `view=purchases` to the URL while it's open.
+21. **Heather's answers to the v0.2.8 questions:**
+    - Q1: foundation only.
+    - Q2: merge and tag when CI is green.
+    - Q3: keep the 1-year purge, shown in Settings; health items stay deleted at once.
+    - Q4: a tap never moves a tag; "Move tag here" opens a picker; typing stays as an advanced fallback.
+    - Q5: Heather edits the v0.2.6 release page herself.
+22. **"Wore it" is on every garment.**
+    - It appends `{id, at, source: "manual"}` to the garment's wear log and sets `out_since`, the field reserved for v0.3's "out". It's sent as `worn_since`.
+    - The laundry `state` is never changed, so stations and their logic are untouched.
+    - "Worn" ends when the laundry state next changes, by a station or phone tap or a manual To laundry / Clean.
+    - The log keeps the latest 1000 entries.
+23. **Wear-log shape for v0.3 without a migration:**
+    - Every entry has a ULID `id`, plus `at` and `source`. A station wear will add `station`.
+    - Readers skip entries without `at` and ignore unknown keys.
+    - `wear_count` counts valid entries, and `last_worn` is the latest `at`.
+    - Capability `wear_log` (the docs had reserved that name for v0.3), listed now since "Wore it" works.
+24. **Undo:**
+    - `garment/wear_undo` removes a *manual* entry by id. Station entries, when they come, aren't undoable this way.
+    - "Worn" goes back to what it was before that wear (kept in memory for the session); otherwise it's cleared if it came from that entry.
+    - The 10-second limit is the panel toast's; the server has none, which also lets v0.3 edit or delete wears later.
+25. **The ranking helper stays internal** (`availability()` and `rank_available()` in hub.py, tested, with no command and no UI):
+    - Base: put away 1, new 0.6, in the wash or drying 0. Worn and not back yet: 0.3.
+    - Blend: `trust × base + (1 − trust) × 0.5`, where trust is `state_confidence`. A stale untagged "in the wash" scores 0.375, not 0: its state carries less weight instead of being believed.
+    - Worn in the last 2 days: × 0.7. Archived garments are excluded.
+26. **"Move tag here"** opens a picker of the other tagged garments:
+    - each row shows the photo, owner and type; one row per tag when a garment has several;
+    - the panel then asks "Move tag from <garment> to <garment>?" and moves it with one call;
+    - it's on untagged and tagged garments (a second tag);
+    - typing an ID is under "Advanced: type a tag ID" in the waiting state;
+    - the tag_in_use answer to a typed ID still offers "Move tag here" for that tag.
+27. **Settings → Purchase emails says "Archived cards and their photos are deleted 1 year after archiving."** Health items are still deleted at once (cleanup and extraction).
+28. **The toast gained an optional action button** (`ctx.toast(text, error, {label, run})`), shown for 10 seconds. It's used for "Wore it" → Undo.
+
 # Decisions (v0.2.7)
 
 Choices made while building v0.2.7 without asking. Each line: decision, then reason.

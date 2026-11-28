@@ -22,6 +22,21 @@ function tileBtn(ctx, { name, count, items, strip, filters, hint }) {
   </button>`;
 }
 
+// v0.2.8: Purchases is easy to find: a top card whenever new cards wait.
+function purchasesCard(ctx) {
+  const { lib, data } = ctx;
+  if (!ctx.wardrobe) return "";
+  const cards = lib.unmatchedCards(data);
+  if (!cards.length) return "";
+  const shown = cards.slice(0, 3).map((c) => {
+    const url = c.photo_urls?.[0]?.thumb;
+    return `<div class="thumb">${url ? `<img src="${lib.esc(url)}" alt="" loading="lazy">` : `<span aria-hidden="true">${lib.esc(lib.initials(c.name))}</span>`}</div>`;
+  }).join("");
+  return `<button type="button" class="card attention purchases-card" data-act="openPurchases" data-section="purchases-card">
+      <span style="flex:1;display:flex;flex-direction:column;gap:6px"><strong>Purchases · ${cards.length} to review</strong>
+      <div class="thumbs">${shown}</div></span>${lib.ICON.chevron}</button>`;
+}
+
 export function render(ctx) {
   const { lib, data } = ctx;
   const garments = data.garments.filter(active);
@@ -31,13 +46,14 @@ export function render(ctx) {
       <button type="button" class="icon-btn" data-act="tab" data-tab="add" aria-label="Add garment">${lib.ICON.plus}</button></div>`;
 
   if (!garments.length) {
-    return `${head}<div class="card empty">
+    return `${head}${purchasesCard(ctx)}<div class="card empty">
       <div class="ring"><div>${lib.ICON.tag}</div></div>
       <strong style="font-size:20px">No garments yet</strong>
       <p class="hint" style="margin:0;font-size:16px">Tap a new tag on any station to add your first one.</p>
       <button type="button" class="btn primary" data-act="tab" data-tab="add">Add a garment</button></div>`;
   }
 
+  const purchases = purchasesCard(ctx);
   const missing = garments.filter((g) => g.missing);
   const attention = missing.length
     ? `<button type="button" class="card attention" data-act="drill" data-filters='{"location":["missing"]}'>
@@ -70,7 +86,7 @@ export function render(ctx) {
   const outTile = out.length ? tileBtn(ctx, { name: "Out", count: out.length, items: out, filters: {} }) : "";
 
   return `${head}
-    <div class="stack">${attention}</div>
+    <div class="stack">${purchases}${attention}</div>
     <div class="two-col">
       <section><h2 class="section-label">Closets</h2><div class="tiles">${closets}${outTile}</div>
         <h2 class="section-label">Drying</h2><div class="tiles">${dryTile}</div></section>
@@ -79,6 +95,10 @@ export function render(ctx) {
 }
 
 export const actions = {
+  openPurchases(ctx) {
+    ctx.state.filters = { ...ctx.state.filters, purchases: true, archivedPurchases: false };
+    ctx.go("closet");
+  },
   drill(ctx, el) {
     const filters = JSON.parse(el.dataset.filters || "{}");
     const base = { owner: [], location: [], bin: [], needsPhoto: false, needsReview: false, tax: {}, q: "" };

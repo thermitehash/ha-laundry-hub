@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
@@ -21,6 +21,7 @@ from homeassistant.helpers import (
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
+from homeassistant.util.ulid import ulid_now
 
 from . import taxonomy
 from .access import Caller, Forbidden, can_see_garment
@@ -42,6 +43,7 @@ from .const import (
     DOMAIN,
     EVENT_UNKNOWN,
     FEEDBACK_ERROR,
+    FEEDBACK_KNOWN,
     FEEDBACK_UNKNOWN,
     MAX_NAME_LEN,
     MAX_NOTES_LEN,
@@ -82,6 +84,91 @@ BASE_VIEW_KEYS = (
 )  # fmt: skip
 MISSING_REFRESH = timedelta(hours=1)
 LOCATIONS = (*CLOSET_STATIONS, STATE_IN_WASH, STATE_DRYING)
+LINK_WINDOW = timedelta(minutes=2)  # "Attach tag": the next unknown tap links
+# How much a manually set state is trusted as it ages (v0.2.8). Station taps
+# are trusted fully; a hand-set state is fresh for FRESH_FOR, then fades to
+# STALE_WEIGHT at STALE_AFTER. Future suggestions multiply by this weight.
+FRESH_FOR = timedelta(days=2)
+STALE_AFTER = timedelta(days=30)
+STALE_WEIGHT = 0.25
+UNKNOWN_WEIGHT = 0.5  # an untagged garment nobody has updated yet
+MAX_WEAR_LOG = 1000  # oldest wears are dropped beyond this
+# Availability for outfit ranking (v0.2.8 foundation; no UI until v0.3).
+AVAILABILITY = {STATE_PUT_AWAY: 1.0, "new": 0.6, STATE_IN_WASH: 0.0, STATE_DRYING: 0.0}
+WORN_AVAILABILITY = 0.3  # worn and not yet back in the laundry or closet
+NEUTRAL = 0.5  # what an untrusted state fades towards
+RECENTLY_WORN = timedelta(days=2)
+RECENTLY_WORN_FACTOR = 0.7
+
+
+def wear_entries(garment: Garment) -> list[dict[str, Any]]:
+    """The garment's wear log entries (anything malformed is skipped)."""
+    return [w for w in garment.wear_log if isinstance(w, dict) and w.get("at")]
+
+
+def last_worn(garment: Garment) -> str | None:
+    """ISO time of the latest wear, or None."""
+    times = [str(w["at"]) for w in wear_entries(garment)]
+    return max(times) if times else None
+
+
+def availability(garment: Garment, now: datetime) -> float:
+    """How likely the garment is ready to wear now (0..1). Internal; for v0.3.
+
+    The laundry state gives a base (put away 1, new 0.6, in the wash or
+    drying 0; worn and not back yet 0.3). An untrusted state (an untagged
+    garment updated long ago) fades towards a neutral 0.5 instead of being
+    believed, and anything worn in the last 2 days is a little less likely.
+    """
+    base = (
+        WORN_AVAILABILITY if garment.out_since else AVAILABILITY.get(garment.state, 0.5)
+    )
+    trust = state_confidence(garment, now)
+    score = trust * base + (1 - trust) * NEUTRAL
+    worn = last_worn(garment)
+    when = dt_util.parse_datetime(worn) if worn else None
+    if when is not None and now - when < RECENTLY_WORN:
+        score *= RECENTLY_WORN_FACTOR
+    return round(score, 3)
+
+
+def rank_available(
+    garments: Iterable[Garment], now: datetime
+) -> list[tuple[Garment, float]]:
+    """Active garments, most likely ready to wear first (internal, tested)."""
+    scored = [(g, availability(g, now)) for g in garments if g.lifecycle == "active"]
+    return sorted(scored, key=lambda item: (-item[1], item[0].name.lower()))
+
+
+def state_confidence(garment: Garment, now: datetime) -> float:
+    """How much to trust the garment's laundry state (0..1).
+
+    Tagged garments are tracked by stations: 1.0. An untagged garment's state
+    is only as good as its last manual update, so it fades with age; never
+    updated at all, it's a coin toss.
+    """
+    if garment.tagged:
+        return 1.0
+    if garment.state_updated is None:
+        return UNKNOWN_WEIGHT
+    age = now - garment.state_updated
+    if age <= FRESH_FOR:
+        return 1.0
+    if age >= STALE_AFTER:
+        return STALE_WEIGHT
+    span = (STALE_AFTER - FRESH_FOR).total_seconds()
+    fade = (age - FRESH_FOR).total_seconds() / span
+    return round(1.0 - fade * (1.0 - STALE_WEIGHT), 3)
+
+
+@dataclass(slots=True)
+class LinkSession:
+    """Waiting for an unknown tap to link to a garment (v0.2.8)."""
+
+    garment_id: str
+    replace: bool
+    expires: datetime
+    user_id: str | None
 
 
 def validation_error(
@@ -144,6 +231,8 @@ class LaundryHub:
         self._tap_lock = asyncio.Lock()
         self._unsubs: list[Callable[[], None]] = []
         self._notified: dict[str, datetime] = {}
+        self._link: LinkSession | None = None
+        self._wear_undo: dict[str, datetime | None] = {}
         self.zone_snapshot: dict[str, ConfigSubentry] = dict(entry.subentries)
         self.wardrobe = Wardrobe(self)
         self.purchases = PurchaseInbox(self)
@@ -357,6 +446,9 @@ class LaundryHub:
         """
         garment = self.catalog.by_uid(uid)
         if garment is None:
+            linked = self._link_pending(uid, origin or station, now)
+            if linked is not None:
+                return linked
             return self._unknown_tap(origin or station, uid, now)
 
         try:
@@ -376,6 +468,9 @@ class LaundryHub:
 
         garment.state = decision.new_state
         garment.location = decision.location
+        garment.out_since = None  # back in the laundry cycle: no longer "worn"
+        garment.state_source = "tap"
+        garment.state_updated = now
         garment.last_seen = now
         garment.last_seen_station = station
         if decision.laundry_tap:
@@ -500,6 +595,17 @@ class LaundryHub:
                     "tag_not_enrolled", "That tag isn't on a garment yet"
                 )
             async with self._tap_lock:
+                linked = self._link_pending(uid, origin, now, caller=caller)
+                if linked is not None:
+                    tagged = self.catalog.garments[str(linked.garment_id)]
+                    return {
+                        "known": True,
+                        "uid": uid,
+                        "linked": True,
+                        "garment": self.garment_view(tagged),
+                        "available_actions": self.available_actions(tagged),
+                        "rev": self.revs.rev,
+                    }
                 self._unknown_tap(origin, uid, now, caller.user_id)
             # The tapper may enrol it (members: for themselves, within 30 min).
             can_enrol = caller.is_admin or (
@@ -549,6 +655,225 @@ class LaundryHub:
             "rev": self.revs.rev,
         }
 
+    # --- untagged garments and tag linking (v0.2.8) --------------------
+
+    def set_manual_state(self, garment: Garment, action: str) -> Garment:
+        """Change an untagged garment's laundry state by hand.
+
+        ``to_laundry`` → in the wash, ``put_away`` → clean and put away. The
+        location stays unknown (None): a station never saw it.
+        """
+        if garment.tagged:
+            raise validation_error(
+                "garment_has_tag", "Tap its tag at a station to change its state"
+            )
+        states = {"to_laundry": STATE_IN_WASH, "put_away": STATE_PUT_AWAY}
+        if action not in states:
+            raise validation_error(
+                "invalid_action", f"{action} isn't a manual action", action=action
+            )
+        now = dt_util.utcnow()
+        garment.state = states[action]
+        garment.location = None
+        garment.out_since = None
+        garment.state_source = "manual"
+        garment.state_updated = now
+        self.catalog.record_garment_tap(
+            garment,
+            {
+                "time": now.isoformat(),
+                "station": "manual",
+                "event": garment.state,
+                "mode": "manual",
+                "repeat": False,
+            },
+        )
+        self.catalog.schedule_save()
+        self.notify_changed()
+        return garment
+
+    def record_wear(
+        self,
+        garment: Garment,
+        *,
+        source: str = "manual",
+        station: str | None = None,
+        at: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Wore it: add a wear-log entry and mark the garment worn.
+
+        Entries are ``{id, at, source}`` (+ ``station`` for v0.3's station
+        wears). The id lets a wear be undone or edited without a migration.
+        Worn lasts until the garment's laundry state next changes.
+        """
+        when = at or dt_util.utcnow()
+        entry: dict[str, Any] = {
+            "id": ulid_now(),
+            "at": when.isoformat(),
+            "source": source,
+        }
+        if station:
+            entry["station"] = station
+        self._wear_undo[entry["id"]] = garment.out_since
+        garment.wear_log = [*garment.wear_log, entry][-MAX_WEAR_LOG:]
+        garment.out_since = when
+        self.catalog.schedule_save()
+        self.notify_changed()
+        return entry
+
+    def undo_wear(self, garment: Garment, wear_id: str) -> Garment:
+        """Remove a manual wear (the toast's Undo); "worn" goes back as it was."""
+        entry = next((w for w in wear_entries(garment) if w.get("id") == wear_id), None)
+        if entry is None or entry.get("source") != "manual":
+            raise validation_error("unknown_wear", "That wear isn't in the log")
+        garment.wear_log = [w for w in garment.wear_log if w is not entry]
+        if wear_id in self._wear_undo:
+            garment.out_since = self._wear_undo.pop(wear_id)
+        elif garment.out_since and garment.out_since.isoformat() == entry["at"]:
+            garment.out_since = None
+        self.catalog.schedule_save()
+        self.notify_changed()
+        return garment
+
+    def start_link(
+        self, garment: Garment, *, replace: bool = False, user_id: str | None = None
+    ) -> datetime:
+        """Link the next unknown tap (any station or phone) to this garment.
+
+        One session at a time; a new one replaces the old. Returns the expiry.
+        """
+        expires = dt_util.utcnow() + LINK_WINDOW
+        self._link = LinkSession(garment.id, replace, expires, user_id)
+        self.notify_changed()
+        return expires
+
+    def cancel_link(self) -> None:
+        """Stop waiting for a tap."""
+        self._link = None
+        self.notify_changed()
+
+    def link_status(self) -> dict[str, Any] | None:
+        """The active link session, for the panel (None when there is none)."""
+        session = self._link
+        if session is None or dt_util.utcnow() > session.expires:
+            return None
+        return {
+            "garment_id": session.garment_id,
+            "replace": session.replace,
+            "expires": session.expires.isoformat(),
+        }
+
+    def _link_pending(
+        self, uid: str, origin: str, now: datetime, caller: Caller | None = None
+    ) -> TapResult | None:
+        """An unknown tap during a link session links to that garment."""
+        session = self._link
+        if session is None:
+            return None
+        if now > session.expires:
+            self._link = None
+            return None
+        if (
+            caller is not None
+            and not caller.is_admin
+            and session.user_id
+            not in (
+                None,
+                caller.user_id,
+            )
+        ):
+            return None  # a member's phone only completes their own session
+        garment = self.catalog.garments.get(session.garment_id)
+        self._link = None
+        if garment is None:
+            return None
+        self._apply_tag(garment, uid, replace=session.replace)
+        _LOGGER.info("Linked a tag tapped at %s to %s", origin, garment.name)
+        return TapResult(uid, origin, FEEDBACK_KNOWN, EVENT_UNKNOWN, garment.id)
+
+    def attach_tag(
+        self,
+        garment: Garment,
+        raw_uid: str,
+        *,
+        replace: bool = False,
+        move: bool = False,
+    ) -> Garment:
+        """Attach a known tag UID to a garment now.
+
+        A tag on another garment is refused (``tag_in_use``) unless ``move``.
+        ``replace`` removes the garment's current tags first (a lost tag).
+        """
+        uid = self._uid(raw_uid)
+        other = self.catalog.by_uid(uid)
+        if other is not None and other.id != garment.id:
+            if not move:
+                raise validation_error(
+                    "tag_in_use",
+                    f"That tag belongs to {other.name}; move it here instead?",
+                    name=other.name,
+                    garment_id=other.id,
+                )
+            self.catalog.remove_uid(other.id, uid, allow_last=True)
+        self._apply_tag(garment, uid, replace=replace)
+        return garment
+
+    def _apply_tag(self, garment: Garment, uid: str, *, replace: bool) -> None:
+        if replace:
+            for old in list(garment.uids):
+                if old != uid:
+                    self.catalog.remove_uid(garment.id, old, allow_last=True)
+        self.catalog.add_uid(garment.id, uid)
+        self.catalog.schedule_save()
+        self.notify_changed()
+
+    def remove_tag(self, garment: Garment, raw_uid: str | None = None) -> Garment:
+        """Remove one tag, or all (back to untagged; history is kept)."""
+        uids = [self._uid(raw_uid)] if raw_uid else list(garment.uids)
+        for uid in uids:
+            self.catalog.remove_uid(garment.id, uid, allow_last=True)
+        if not garment.tagged:
+            garment.location = None  # no station can vouch for it any more
+        self.catalog.schedule_save()
+        self.notify_changed()
+        return garment
+
+    def link_candidates(
+        self, uid: str | None = None, *, owner: str | None = None
+    ) -> list[Garment]:
+        """Untagged garments, most likely match first.
+
+        The tag itself says nothing about the garment, so the clues are who
+        tapped it (their owner first), then the newest garments, grouped by
+        type and colour so similar ones sit together.
+        """
+        tag = self.catalog.unknown_tags.get(self._uid(uid)) if uid else None
+        if owner is None and tag and tag.get("tapped_by"):
+            from .access import owner_for  # noqa: PLC0415 - avoid import cycle
+
+            owner = owner_for(self, str(tag["tapped_by"]))
+        untagged = [
+            g
+            for g in self.catalog.garments.values()
+            if not g.tagged and g.lifecycle == "active"
+        ]
+
+        def key(g: Garment) -> tuple[int, float, str, str, str]:
+            desc = g.description or {}
+            colors = desc.get("colors") or []
+            color = (
+                colors[0].get("name") if colors and isinstance(colors[0], dict) else ""
+            )
+            return (
+                0 if owner and g.owner == owner else 1,
+                -g.created.timestamp(),
+                str(desc.get("type") or ""),
+                str(color or ""),
+                g.name.lower(),
+            )
+
+        return sorted(untagged, key=key)
+
     # --- feedback & notifications ----------------------------------------
 
     def feedback_service(self, station: str) -> str | None:
@@ -597,8 +922,22 @@ class LaundryHub:
         if not target:
             return
         url = f"/{PANEL_URL}?page=enroll&uid={uid}"
+        link_url = f"/{PANEL_URL}?page=link&uid={uid}"
+        untagged = any(not g.tagged for g in self.catalog.garments.values())
         title = "New laundry tag"
         message = f"Unknown tag {uid} tapped at {station.replace('_', ' ')}."
+        actions = [{"action": "URI", "title": "Enroll", "uri": url}]
+        if untagged:
+            message += (
+                " Add it as a new garment, or link it to a garment without a tag."
+            )
+            actions.append(
+                {
+                    "action": "URI",
+                    "title": "Link to an untagged garment…",
+                    "uri": link_url,
+                }
+            )
         try:
             if str(target).startswith("notify.") and self.hass.states.get(target):
                 await self.hass.services.async_call(
@@ -621,7 +960,7 @@ class LaundryHub:
                     "data": {
                         "url": url,
                         "clickAction": url,
-                        "actions": [{"action": "URI", "title": "Enroll", "uri": url}],
+                        "actions": actions,
                     },
                 },
                 blocking=True,
@@ -707,7 +1046,7 @@ class LaundryHub:
     def enroll(
         self,
         *,
-        uid: str,
+        uid: str | None,
         name: str,
         wash_bin: str | None = None,
         dry_type: str | None = None,
@@ -715,8 +1054,13 @@ class LaundryHub:
         notes: str | None = None,
         location: str | None = None,
     ) -> Garment:
-        """Create a garment."""
-        norm_uid = self._uid(uid)
+        """Create a garment (``uid`` None or empty: untagged, v0.2.8)."""
+        norm_uid = self._uid(uid) if uid else None
+        if norm_uid is None and location not in (None, ""):
+            raise validation_error(
+                "untagged_location",
+                "A garment without a tag has no known location; leave it empty",
+            )
         clean_name = self._validate_name(name)
         bins = self.zones_of(SUBENTRY_WASH_BIN)
         dries = self.zones_of(SUBENTRY_DRY_TYPE)
@@ -911,7 +1255,12 @@ class LaundryHub:
     # --- derived views ---------------------------------------------------
 
     def is_missing(self, garment: Garment, now: datetime | None = None) -> bool:
-        """True when the garment has not been seen for missing_after."""
+        """True when a tagged garment has not been seen for missing_after.
+
+        An untagged garment is never "missing": no station can see it.
+        """
+        if not garment.tagged:
+            return False
         return is_missing(
             garment.last_seen,
             garment.created,
@@ -929,7 +1278,9 @@ class LaundryHub:
         return sum(
             1
             for g in self.catalog.garments.values()
-            if g.state == state and (location is None or g.location == location)
+            if g.tagged  # station counts ignore untagged garments (v0.2.8)
+            and g.state == state
+            and (location is None or g.location == location)
         )
 
     def per_zone(self, state: str, zone_type: str) -> dict[str, int]:
@@ -939,7 +1290,7 @@ class LaundryHub:
         )
         counts = {z.id: 0 for z in self.zones_of(zone_type)}
         for garment in self.catalog.garments.values():
-            if garment.state == state:
+            if garment.tagged and garment.state == state:
                 zone_id = getattr(garment, field)
                 if zone_id in counts:
                     counts[zone_id] += 1
@@ -977,6 +1328,19 @@ class LaundryHub:
         data = {key: stored[key] for key in BASE_VIEW_KEYS}
         data["photo"] = garment.photo
         data["missing"] = self.is_missing(garment, now)
+        # v0.2.8: tags are optional; untagged states are set by hand.
+        data["tagged"] = garment.tagged
+        data["state_source"] = garment.state_source
+        data["state_updated"] = (
+            garment.state_updated.isoformat() if garment.state_updated else None
+        )
+        data["state_confidence"] = state_confidence(garment, now or dt_util.utcnow())
+        # v0.2.8: wears ("Wore it"; station wears come in v0.3).
+        data["wear_count"] = len(wear_entries(garment))
+        data["last_worn"] = last_worn(garment)
+        data["worn_since"] = (
+            garment.out_since.isoformat() if garment.out_since else None
+        )
         data.update(self.wardrobe.view(garment))
         return self.revs.stamp("garment", garment.id, data)
 
@@ -1002,6 +1366,7 @@ class LaundryHub:
         self.revs.sync(now)
         return {
             "rev": self.revs.rev,
+            "link": self.link_status(),
             "garments": [
                 self.garment_view(g, now, synced=True)
                 for g in self.catalog.garments.values()

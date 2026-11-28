@@ -223,3 +223,14 @@ button.pcard:focus-visible, button.pcard[aria-pressed="true"] { border-color: va
 .history li span { flex: 1; min-width: 0; }
 .suggest { border-style: dashed; }
 .btn.small { padding: 0 var(--hub-space-3); font-size: var(--hub-text-sm); }
+
+/* v0.2.8: garments without a tag */
+.gcard .notag { position: absolute; top: 6px; left: 6px; font-size: var(--hub-text-sm); font-weight: 600; padding: 2px 8px; border-radius: var(--hub-radius-pill); background: var(--hub-card); color: var(--hub-text-muted); border: 1px solid var(--app-border-strong); }
+.tagbox { display: flex; flex-direction: column; gap: var(--hub-space-2); }
+.notag-inline { font-weight: 600; color: var(--hub-text-muted); }
+/* v0.2.8: Purchases badge on the Closet tab, and the Home card */
+.tab-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px; margin-left: 4px; border-radius: var(--hub-radius-pill); background: var(--app-accent); color: var(--app-on-accent); font-size: 12px; font-weight: 700; }
+.tabbar .tab-badge { position: absolute; top: 4px; margin-left: 18px; }
+.tabbar button { position: relative; }
+.purchases-card .thumb span { font-weight: 600; color: var(--hub-text-muted); }
+.toast-action { margin-left: 12px; background: none; border: none; color: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; min-height: 32px; }

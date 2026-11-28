@@ -4,10 +4,10 @@ const LIST_FIELDS = ["colors", "material", "seasons", "occasions"];
 const ENUM_FIELDS = ["type", "subtype", "pattern", "sleeve_length", "neckline", "length", "fit", "rise"];
 const RANGE_FIELDS = ["formality", "warmth"];
 const FACETS = ["type", "subtype", "colors", "sleeve_length", "neckline", "length", "fit", "rise", "material", "pattern", "seasons", "occasions", "wear_for", "uniform", "size"];
-const LOCATIONS = ["closet_1", "closet_2", "in_wash", "drying", "new", "missing"];
+const LOCATIONS = ["closet_1", "closet_2", "put_away", "in_wash", "drying", "new", "missing"];
 const BULK_SET_FIELDS = ["wear_for", "uniform", "type", "subtype", "colors", "pattern", "sleeve_length", "neckline", "length", "fit", "rise", "material", "formality", "warmth", "seasons", "occasions"];
 
-const locKey = (g) => (g.state === "put_away" ? g.location : g.state === "in_wash" ? "in_wash" : g.state === "drying" ? "drying" : "new");
+const locKey = (g) => (g.state === "put_away" ? g.location || "put_away" : g.state === "in_wash" ? "in_wash" : g.state === "drying" ? "drying" : "new");
 
 // Values a garment has for a facet (always an array of strings).
 function values(g, field) {
@@ -43,6 +43,7 @@ export function matches(ctx, g, filters, skip = null) {
     if (!f.location.some((l) => keys.includes(l))) return false;
   }
   if (skip !== "bin" && f.bin.length && !f.bin.includes(g.wash_bin)) return false;
+  if (skip !== "tag" && f.tag && (f.tag === "tagged") !== (g.tagged !== false)) return false;
   if (f.needsPhoto && (g.photos || []).length) return false;
   if (f.needsReview && !g.needs_review) return false;
   for (const [field, wanted] of Object.entries(f.tax || {})) {
@@ -67,6 +68,7 @@ function countFor(ctx, field, value) {
     if (field === "owner") return (g.owner || "__none") === value;
     if (field === "location") return locKey(g) === value || (value === "missing" && g.missing);
     if (field === "bin") return g.wash_bin === value;
+    if (field === "tag") return (value === "tagged") === (g.tagged !== false);
     return values(g, field).includes(value);
   }).length;
 }
@@ -98,6 +100,11 @@ function chipRow(ctx) {
   for (const bin of data.wash_bins) {
     const n = countFor(ctx, "bin", bin.id);
     if (n || f.bin.includes(bin.id)) out.push(chip(ctx, { label: bin.name, act: "toggleFilter", attrs: `data-field="bin" data-value="${bin.id}"`, on: f.bin.includes(bin.id), count: n, dot: lib.rgb(bin.color) }));
+  }
+  if (data.garments.some((g) => g.tagged === false)) {
+    for (const [value, label] of [["tagged", "Tagged"], ["untagged", "No tag"]]) {
+      out.push(chip(ctx, { label, act: "tagFilter", attrs: `data-value="${value}"`, on: f.tag === value, count: countFor(ctx, "tag", value) }));
+    }
   }
   if (ctx.wardrobe) {
     out.push(chip(ctx, { label: "Needs photo", act: "toggleFlag", attrs: 'data-flag="needsPhoto"', on: f.needsPhoto }));
@@ -136,6 +143,7 @@ export function card(ctx, g, selectable = false, selected = false) {
   return `<button type="button" class="gcard" data-act="${selectable ? "toggleSelect" : "openGarment"}" data-id="${g.id}" ${selectable ? `aria-pressed="${selected}"` : ""} aria-label="${lib.esc(g.name)}, ${lib.esc(where.text)}">
     <div class="media">${url ? `<img src="${lib.esc(url)}" alt="" loading="lazy">` : lib.tile(g, bin)}
       <span class="where ${where.warn ? "warn" : ""}">${lib.esc(where.text)}</span>
+      ${g.tagged === false ? `<span class="notag">No tag</span>` : ""}
       ${selectable ? `<span class="check" aria-hidden="true">${selected ? lib.ICON.check : ""}</span>` : ""}</div>
     <div class="body"><span class="name">${lib.esc(g.name)}</span>
       <span class="meta">${owner ? `<span class="avatar" title="${lib.esc(owner)}">${lib.esc(lib.initials(owner))}</span>` : ""}
@@ -207,6 +215,7 @@ function purchasesInbox(ctx) {
     ? `<div class="row wrap"><span class="sub" style="flex:1">${c.status === "dismissed" ? "Dismissed" : "Archived"} ${lib.esc(lib.timeAgo(c.status_changed))}</span>
         <button type="button" class="btn primary" data-act="restorePurchase" data-card="${lib.esc(c.id)}">Restore</button></div>`
     : `${groupControls(ctx, c)}<div class="row wrap"><button type="button" class="btn primary" data-act="openSheet" data-kind="matchPurchase" data-field="${lib.esc(c.id)}">Match to garment</button>
+        <button type="button" class="btn" data-act="garmentFromCard" data-card="${lib.esc(c.id)}">New garment from this</button>
         <button type="button" class="btn" data-act="openSheet" data-kind="mergePurchase" data-field="${lib.esc(c.id)}">Merge…</button>
         <button type="button" class="btn" data-act="dismissPurchase" data-card="${lib.esc(c.id)}">Dismiss</button>
         <button type="button" class="btn" data-act="notClothing" data-card="${lib.esc(c.id)}">Not clothing</button></div>`;
@@ -391,6 +400,49 @@ function mergeSheet(ctx) {
     <div class="stack">${others.map((o) => lib.purchaseCard(o, { act: "mergePurchase", attrs: `data-other="${lib.esc(o.id)}"` })).join("") || `<span class="hint">No other cards to merge with.</span>`}</div>`;
 }
 
+// v0.2.8: link an unknown tag to a garment without one, most likely first.
+function linkTagSheet(ctx) {
+  const { lib, data, state } = ctx;
+  const uid = state.sheet.field;
+  const list = state.sheet.candidates || (data.garments || []).filter((g) => g.tagged === false);
+  const desc = (g) => [g.description?.type, (g.description?.colors || [])[0]?.name, ctx.personName(g.owner)].filter(Boolean).join(" · ");
+  return `<div class="sheet-head"><h2>Link tag …${lib.esc(String(uid || "").slice(-6))} to</h2><button type="button" class="icon-btn plain" data-act="closeSheet" aria-label="Close">${lib.ICON.close}</button></div>
+    <span class="hint">Garments without a tag, most likely first.</span>
+    <div class="stack">${list.map((g) => `<button type="button" class="pick-row" data-act="linkTag" data-id="${g.id}">
+      <span class="avatar">${lib.esc(lib.initials(g.name))}</span><span style="flex:1;text-align:left">${lib.esc(g.name)}</span><span class="sub">${lib.esc(desc(g))}</span></button>`).join("") || `<span class="hint">Every garment has a tag.</span>`}</div>`;
+}
+
+export async function loadCandidates(ctx, uid) {
+  const res = await ctx.ws("unknown/link_candidates", { uid });
+  if (res && ctx.state.sheet?.kind === "linkTag") { ctx.state.sheet.candidates = res.garments; ctx.render(); }
+}
+
+// v0.2.8: "Move tag here" picks the garment the tag is on now (no typing).
+function moveTagSheet(ctx) {
+  const { lib, data, state } = ctx;
+  const target = ctx.garment(state.sheet.field);
+  if (!target) return `<p>That garment is gone.</p>`;
+  const q = (state.sheet.q || "").toLowerCase().trim();
+  const rows = [];
+  for (const g of data.garments) {
+    if (g.id === target.id || !(g.uids || []).length) continue;
+    if (q && !`${g.name} ${ctx.personName(g.owner)} ${g.description?.type || ""}`.toLowerCase().includes(q)) continue;
+    for (const uid of g.uids) rows.push({ g, uid, many: g.uids.length > 1 });
+  }
+  rows.sort((a, b) => a.g.name.localeCompare(b.g.name));
+  return `<div class="sheet-head"><h2>Move a tag to “${lib.esc(target.name)}”</h2><button type="button" class="icon-btn plain" data-act="closeSheet" aria-label="Close">${lib.ICON.close}</button></div>
+    <span class="hint">Pick the garment the tag is on now.</span>
+    <label class="search">${lib.ICON.search}<span class="sr-only">Search garments</span>
+      <input type="search" data-input="matchSearch" data-keep="matchSearch" placeholder="Search garments" value="${lib.esc(state.sheet.q || "")}"></label>
+    <div class="stack">${rows.slice(0, 60).map(({ g, uid, many }) => {
+      const url = lib.coverThumb(g);
+      const meta = [ctx.personName(g.owner), g.description?.type, many ? `tag …${uid.slice(-6)}` : null].filter(Boolean).join(" · ");
+      return `<button type="button" class="pick-row" data-act="pickMoveTag" data-id="${g.id}" data-uid="${lib.esc(uid)}">
+        <span class="avatar">${url ? `<img src="${lib.esc(url)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:inherit">` : lib.esc(lib.initials(g.name))}</span>
+        <span style="flex:1;text-align:left">${lib.esc(g.name)}</span><span class="sub">${lib.esc(meta)}</span></button>`;
+    }).join("") || `<span class="hint">No other garment has a tag.</span>`}</div>`;
+}
+
 export function renderSheet(ctx) {
   const { lib, state } = ctx;
   const sheet = state.sheet;
@@ -400,6 +452,8 @@ export function renderSheet(ctx) {
   else if (sheet.kind === "setfield") inner = setFieldSheet(ctx);
   else if (sheet.kind === "matchPurchase") inner = matchSheet(ctx);
   else if (sheet.kind === "assignPurchase") inner = assignSheet(ctx);
+  else if (sheet.kind === "linkTag") inner = linkTagSheet(ctx);
+  else if (sheet.kind === "moveTag") inner = moveTagSheet(ctx);
   else if (sheet.kind === "mergePurchase") inner = mergeSheet(ctx);
   else if (sheet.kind === "confirmDelete") {
     inner = `<h2>Delete ${state.select.ids.size} garment(s)?</h2><p class="hint" style="margin:0">Their tags become unknown again. This can't be undone.</p>
@@ -437,10 +491,11 @@ export const actions = {
     ctx.render();
   },
   clearFilters(ctx) {
-    ctx.state.filters = { q: "", owner: [], location: [], bin: [], needsPhoto: false, needsReview: false, archived: false, purchases: false, tax: {} };
+    ctx.state.filters = { q: "", owner: [], location: [], bin: [], tag: null, needsPhoto: false, needsReview: false, archived: false, purchases: false, tax: {} };
     ctx.render();
   },
   search(ctx, el) { ctx.state.filters.q = el.value; ctx.render(); },
+  tagFilter(ctx, el) { ctx.state.filters.tag = ctx.state.filters.tag === el.dataset.value ? null : el.dataset.value; ctx.render(); },
   togglePurchases(ctx) {
     ctx.state.filters.purchases = !ctx.state.filters.purchases;
     ctx.state.filters.archivedPurchases = false;
@@ -542,7 +597,35 @@ export const actions = {
     ctx.state.select.ids = new Set(filtered(ctx).map((g) => g.id));
     ctx.render();
   },
-  openSheet(ctx, el) { ctx.update({ sheet: { kind: el.dataset.kind, field: el.dataset.field || null, picked: [] } }); },
+  openSheet(ctx, el) {
+    ctx.update({ sheet: { kind: el.dataset.kind, field: el.dataset.field || null, picked: [] } });
+    if (el.dataset.kind === "linkTag") loadCandidates(ctx, el.dataset.field);
+  },
+  async pickMoveTag(ctx, el) {
+    const target = ctx.garment(ctx.state.sheet?.field);
+    const source = ctx.garment(el.dataset.id);
+    if (!target || !source) return;
+    if (!window.confirm(`Move tag from ${source.name} to ${target.name}?`)) return;
+    const res = await ctx.ws("garment/attach_tag", { garment_id: target.id, uid: el.dataset.uid, move: true });
+    if (res) { ctx.toast(`Tag moved to ${target.name}`); ctx.update({ sheet: null }); ctx.reload(); }
+  },
+  async linkTag(ctx, el) {
+    const uid = ctx.state.sheet?.field;
+    const res = await ctx.ws("garment/attach_tag", { garment_id: el.dataset.id, uid });
+    if (res) { ctx.toast(`Linked to ${res.garment.name}`); ctx.update({ sheet: null }); ctx.reload(); }
+  },
+  async garmentFromCard(ctx, el) {
+    // "New garment from this": an untagged garment filled from the card.
+    const card = (ctx.data.purchases?.cards || []).find((c) => c.id === el.dataset.card);
+    if (!card) return;
+    const res = await ctx.ws("garment/create", { name: card.name, wash_bin: ctx.data.wash_bins[0]?.id, dry_type: ctx.data.dry_types[0]?.id, owner: card.owner || null });
+    if (!res) return;
+    await ctx.ws("purchases/match", { card_id: card.id, garment_id: res.id, units: 1 });
+    ctx.toast(`${res.name} added without a tag`);
+    ctx.state.filters.purchases = false;
+    await ctx.reload();
+    ctx.open(res.id);
+  },
   closeSheet(ctx) { ctx.update({ sheet: null }); },
   pickSetField(ctx, el) { ctx.update({ sheet: { ...ctx.state.sheet, field: el.dataset.field || null, picked: [] } }); },
   pickSetValue(ctx, el) {

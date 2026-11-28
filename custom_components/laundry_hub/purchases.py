@@ -108,6 +108,7 @@ CLEANUP_STATUSES = ("new", "dismissed")
 SUGGEST_AFTER = 2  # similar cards assigned to one owner before a suggestion
 CLEANUP_VERSION = 1  # the one-time cleanup of cards from older versions (v0.2.6/7)
 CLEANUP_RETRIES = 3  # checks that retry it after the AI failed, before giving up
+PURGE_AFTER = timedelta(days=365)  # archived/dismissed cards (and photos) go then
 CLEANUP_DELAY = 120  # seconds after setup
 _COLOR_FAMILIES = {
     "dark": {"black", "navy", "charcoal", "grey", "gray", "brown", "dark", "olive"},
@@ -1334,6 +1335,29 @@ class PurchaseInbox:
             if since is not None and since < cutoff:
                 self._set_status(card, "archived")
                 await self._async_delete_photos(card)
+        await self._async_purge_archived()
+
+    async def _async_purge_archived(self) -> int:
+        """Delete archived or dismissed cards (and their photos) after PURGE_AFTER.
+
+        The "Not clothing" rule and the seen Message-IDs stay, so a purged
+        card never comes back. Matched cards are never purged.
+        """
+        cutoff = dt_util.utcnow() - PURGE_AFTER
+        purged = 0
+        for card in list(self.cards.values()):
+            if card.get("status") not in ("dismissed", "archived"):
+                continue
+            since = dt_util.parse_datetime(str(card.get("status_changed") or ""))
+            if since is not None and since < cutoff:
+                await self._async_delete_photos(card)
+                self.cards.pop(card["id"], None)
+                purged += 1
+        if purged:
+            self.meta["purged"] = int(self.meta.get("purged") or 0) + purged
+            _LOGGER.info("Purged %s archived purchase cards", purged)
+            self.hub.catalog.schedule_save()
+        return purged
 
     def _set_status(self, card: dict[str, Any], status: str) -> None:
         card["status"] = status
@@ -1429,7 +1453,10 @@ class PurchaseInbox:
         )
         # Matched units live on with their garments (which have photo copies).
         self._set_status(card, "matched" if _matched_units(card) else "dismissed")
-        await self._async_delete_photos(card)
+        if not not_clothing:
+            # "Not clothing" keeps its photos so Restore needs no download
+            # (v0.2.8); they go when the archived card is purged.
+            await self._async_delete_photos(card)
         self.hub.catalog.schedule_save()
         self.hub.notify_changed()
         return card

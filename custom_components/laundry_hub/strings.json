@@ -471,6 +471,18 @@
     },
     "unknown_purchase_line": {
       "message": "That purchase isn't in this card."
+    },
+    "garment_has_tag": {
+      "message": "Tap its tag at a station to change its state."
+    },
+    "untagged_location": {
+      "message": "A garment without a tag has no known location; leave it empty."
+    },
+    "tag_in_use": {
+      "message": "That tag belongs to {name}; move it here instead?"
+    },
+    "unknown_wear": {
+      "message": "That wear isn't in the log."
     }
   },
   "issues": {

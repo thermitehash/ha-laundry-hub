@@ -34,6 +34,10 @@ class LaundryHubPanel extends HTMLElement {
     this._unsub = null;
     this._backoff = 1000;
     this._reloadTimer = null;
+    this._loading = null; // the one in-flight laundry_hub/data call
+    this._loadBackoff = 1000;
+    this._loadRetry = null;
+    this._loadNoticeShown = false;
   }
 
   set hass(hass) {
@@ -71,13 +75,19 @@ class LaundryHubPanel extends HTMLElement {
     const page = params.get("page");
     const tab = params.get("tab") || (page === "enroll" ? "add" : page === "garments" ? "closet" : page === "status" ? "home" : null);
     if (TABS.some((t) => t.id === tab)) this.state.tab = tab;
-    if (params.get("uid")) { this.state.tab = "add"; this.state.add.uid = params.get("uid"); this.state.add.step = 2; }
+    if (tab === "closet" && params.get("view") === "purchases") this.state.filters.purchases = true;
+    if (page === "link" && params.get("uid")) {
+      // From the unknown-tag notification: link it to a garment without a tag.
+      this.state.tab = "add";
+      this.state.sheet = { kind: "linkTag", field: params.get("uid"), picked: [] };
+    } else if (params.get("uid")) { this.state.tab = "add"; this.state.add.uid = params.get("uid"); this.state.add.step = 2; }
     if (params.get("garment")) this.state.garment = params.get("garment");
   }
 
   _writeUrl() {
     const params = new URLSearchParams();
     if (this.state.tab !== "home") params.set("tab", this.state.tab);
+    if (this.state.tab === "closet" && this.state.filters.purchases) params.set("view", "purchases");
     if (this.state.garment) params.set("garment", this.state.garment);
     const query = params.toString();
     const url = `${window.location.pathname}${query ? `?${query}` : ""}`;
@@ -85,12 +95,42 @@ class LaundryHubPanel extends HTMLElement {
   }
 
   // --- data & live updates ----------------------------------------------------
-  async _load() {
+  // One load at a time: _init, the "ready" listener and change events share
+  // the in-flight call. Before the first success, "not ready / reconnecting"
+  // errors keep "Loading…" and retry quietly (backoff up to 30 s); one clear
+  // message appears only once the backoff is at its longest.
+  _load() {
+    if (this._loading) return this._loading;
+    this._loading = this._loadOnce().finally(() => { this._loading = null; });
+    return this._loading;
+  }
+
+  async _loadOnce() {
+    const { lib } = this.mods;
     try {
       this.data = await this.hass.callWS({ type: "laundry_hub/data" });
       this.toggleAttribute("follow-ha", Boolean(this.data.follow_ha_theme));
+      clearTimeout(this._loadRetry);
+      this._loadRetry = null;
+      this._loadBackoff = 1000;
+      this._loadNoticeShown = false;
+      this.state.loadError = null;
     } catch (err) {
-      this.toast(err.message || String(err), true);
+      console.error("Laundry Hub: laundry_hub/data failed", err);
+      const quiet = !this.data && (lib.isTransient(err) || this.state.reconnecting);
+      if (quiet) {
+        clearTimeout(this._loadRetry);
+        this._loadRetry = setTimeout(() => { this._loadRetry = null; this._load(); }, this._loadBackoff);
+        if (this._loadBackoff >= 30000 && !this._loadNoticeShown) {
+          this._loadNoticeShown = true;
+          this.state.loadError = lib.errorText(err);
+        }
+        this._loadBackoff = Math.min(this._loadBackoff * 2, 30000);
+      } else if (!this.data) {
+        this.state.loadError = lib.errorText(err);
+      } else {
+        this.toast(lib.errorText(err), true);
+      }
     }
     this.render();
   }
@@ -146,7 +186,7 @@ class LaundryHubPanel extends HTMLElement {
       update: (patch) => { Object.assign(this.state, patch || {}); this.render(); },
       render: () => this.render(),
       reload: () => this._load(),
-      toast: (text, error) => this.toast(text, error),
+      toast: (text, error, action) => this.toast(text, error, action),
       go: (tab, extra = {}) => this.go(tab, extra),
       open: (id) => { this.state.garment = id; this.state.menu = false; this.state.editing = null; this.render(); },
       close: () => { this.state.garment = null; this.state.menu = false; this.state.editing = null; this.render(); },
@@ -159,7 +199,8 @@ class LaundryHubPanel extends HTMLElement {
     try {
       return await this.hass.callWS({ type: `laundry_hub/${type}`, ...payload });
     } catch (err) {
-      this.toast(err.message || String(err), true);
+      console.error(`Laundry Hub: laundry_hub/${type} failed`, err);
+      this.toast(this.mods.lib.errorText(err), true);
       return null;
     }
   }
@@ -172,7 +213,8 @@ class LaundryHubPanel extends HTMLElement {
       try {
         file = await this.mods.lib.prepareUpload(original);
       } catch (err) {
-        this.toast(err.message || "Upload failed", true);
+        console.error("Laundry Hub: preparing an upload failed", err);
+        this.toast(this.mods.lib.errorText(err, "Upload failed"), true);
         continue;
       }
       const form = new FormData();
@@ -181,10 +223,11 @@ class LaundryHubPanel extends HTMLElement {
       try {
         const resp = await this.hass.fetchWithAuth("/api/laundry_hub/photos", { method: "POST", body: form });
         const body = await resp.json();
-        if (!resp.ok) { this.toast(body.message || "Upload failed", true); break; }
+        if (!resp.ok) { this.toast(this.mods.lib.errorText(body, "Upload failed"), true); break; }
         last = body;
       } catch (err) {
-        this.toast(err.message || "Upload failed", true);
+        console.error("Laundry Hub: photo upload failed", err);
+        this.toast(this.mods.lib.errorText(err, "Upload failed"), true);
         break;
       }
     }
@@ -203,11 +246,12 @@ class LaundryHubPanel extends HTMLElement {
     window.scrollTo?.(0, 0);
   }
 
-  toast(text, error = false) {
-    this.state.toast = { text, error };
+  // `action` adds a button to the toast ({label, run}), kept for 10 s (v0.2.8: Undo).
+  toast(text, error = false, action = null) {
+    this.state.toast = { text, error, action };
     this.render();
     clearTimeout(this._toastTimer);
-    this._toastTimer = setTimeout(() => { this.state.toast = null; this.render(); }, error ? 7000 : 3500);
+    this._toastTimer = setTimeout(() => { this.state.toast = null; this.render(); }, action ? 10000 : error ? 7000 : 3500);
   }
 
   // --- rendering ---------------------------------------------------------------
@@ -224,10 +268,16 @@ class LaundryHubPanel extends HTMLElement {
     const sheetScroll = this.shadowRoot.querySelector(".sheet")?.scrollTop ?? 0;
 
     const view = this.mods[this.state.tab] || this.mods.home;
+    const toReview = this.data && ctx.wardrobe ? lib.unmatchedCards(this.data).length : 0;
+    const badge = (t) => (t.id === "closet" && toReview ? `<span class="tab-badge" aria-label="${toReview} purchases to review">${toReview}</span>` : "");
     const tabs = (cls) => TABS.map((t) => `
       <button type="button" data-act="tab" data-tab="${t.id}" ${this.state.tab === t.id ? 'aria-current="page"' : ""}>
-        ${cls === "tabbar" ? lib.ICON[t.icon] : ""}<span>${t.label}</span></button>`).join("");
-    const body = this.data ? view.render(ctx) : `<div class="card empty"><p>Laundry Hub isn't loaded yet.</p></div>`;
+        ${cls === "tabbar" ? lib.ICON[t.icon] : ""}<span>${t.label}</span>${badge(t)}</button>`).join("");
+    const body = this.data
+      ? view.render(ctx)
+      : this.state.loadError
+        ? `<div class="card empty" data-section="load-error"><p>${lib.esc(this.state.loadError)}</p><button type="button" class="btn" data-act="retryLoad">Try again</button></div>`
+        : `<p style="padding:24px">Loading…</p>`;
     root.innerHTML = `
       <div class="app">
         <div class="topbar"><strong style="font-size:20px">Laundry Hub</strong><nav class="segmented" aria-label="Sections">${tabs("segmented")}</nav></div>
@@ -235,7 +285,7 @@ class LaundryHubPanel extends HTMLElement {
         <nav class="tabbar" aria-label="Sections">${tabs("tabbar")}</nav>
         ${this.state.garment && this.data ? this.mods.detail.render(ctx) : ""}
         ${this.state.sheet && this.data ? this.mods.closet.renderSheet(ctx) : ""}
-        ${this.state.toast ? `<div class="toast ${this.state.toast.error ? "error" : ""}" role="status">${lib.esc(this.state.toast.text)}</div>` : ""}
+        ${this.state.toast ? `<div class="toast ${this.state.toast.error ? "error" : ""}" role="status">${lib.esc(this.state.toast.text)}${this.state.toast.action ? ` <button type="button" class="toast-action" data-act="toastAction">${lib.esc(this.state.toast.action.label)}</button>` : ""}</div>` : ""}
         ${this.state.reconnecting ? `<div class="pill-status" role="status">Reconnecting…</div>` : ""}
       </div>`;
     if (keep) {
@@ -254,6 +304,14 @@ class LaundryHubPanel extends HTMLElement {
     const merged = {};
     for (const name of ["home", "closet", "add", "settings", "detail"]) Object.assign(merged, this.mods[name].actions || {});
     merged.tab = (ctx, el) => ctx.go(el.dataset.tab);
+    merged.toastAction = async () => {
+      const action = this.state.toast?.action;
+      clearTimeout(this._toastTimer);
+      this.state.toast = null;
+      this.render();
+      if (action) await action.run();
+    };
+    merged.retryLoad = () => { this.state.loadError = null; this._loadBackoff = 1000; this.render(); this._load(); };
     merged.toastClose = (ctx) => ctx.update({ toast: null });
     return merged;
   }
@@ -266,7 +324,8 @@ class LaundryHubPanel extends HTMLElement {
       try {
         await fn(this.ctx(), el, event);
       } catch (err) {
-        this.toast(err.message || String(err), true);
+        console.error(`Laundry Hub: action ${name} failed`, err);
+        this.toast(this.mods.lib.errorText(err), true);
       }
     };
     this.shadowRoot.addEventListener("click", (event) => {

@@ -10,11 +10,12 @@ export const STATION_LABEL = { laundry: "Laundry room", closet_1: "Closet 1", cl
 export const stationLabel = (station) => {
   const s = String(station || "");
   if (s.startsWith("phone:")) return `Phone · ${s.slice(6) || "phone"}`;
+  if (s === "manual") return "By hand";
   return STATION_LABEL[s] || s;
 };
 export const LOCATION_LABEL = {
   closet_1: "Closet 1", closet_2: "Closet 2", in_wash: "In wash", drying: "Drying",
-  new: "Not placed", missing: "Missing",
+  new: "Not placed", missing: "Missing", put_away: "Put away",
 };
 export const WEAR_FOR_LABEL = {
   any: "Anything", work: "Work", off_duty: "Never to work", occasion: "Occasions", athletic: "Athletic",
@@ -93,7 +94,7 @@ export const capitalize = (text) => String(text || "").replace(/^./, (c) => c.to
 // Where a garment is, as a short label and whether it needs attention.
 export const whereLabel = (g, zoneName) => {
   if (g.missing) return { text: "Missing", warn: true };
-  if (g.state === "put_away") return { text: STATION_LABEL[g.location] || g.location, warn: false };
+  if (g.state === "put_away") return { text: g.location ? STATION_LABEL[g.location] || g.location : "Put away", warn: false };
   if (g.state === "in_wash") return { text: "In wash", warn: false, long: `In wash · ${zoneName(g.wash_bin)}` };
   if (g.state === "drying") return { text: "Drying", warn: false, long: `Drying · ${zoneName(g.dry_type)}` };
   return { text: "Not placed", warn: false };
@@ -178,4 +179,37 @@ export function purchaseCard(card, { act = "", attrs = "", pressed = null, owner
     <div class="pmedia">${thumb ? `<img src="${esc(thumb)}" alt="" loading="lazy">` : `<span aria-hidden="true">${esc(initials(card.name))}</span>`}</div>
     <div class="pbody"><span class="name">${esc(card.name)}${badge ? ` ${badge}` : ""}</span><span class="meta">${esc(meta)}</span>
       ${look ? `<span class="meta">${esc(look)}</span>` : ""}${owner}</div></${tag}>`;
+}
+
+// v0.2.8: every error that becomes text goes through here. HA's websocket can
+// reject with objects that have no `message` (connection not ready, a
+// reconnect, nested {error:{...}}): never show "[object Object]".
+const CODE_TEXT = {
+  1: "Can't connect to Home Assistant",
+  2: "Home Assistant needs you to log in again",
+  3: "Lost connection to Home Assistant",
+  unknown_command: "Laundry Hub is still starting",
+  not_loaded: "Laundry Hub is still starting",
+};
+const usable = (v) => (typeof v === "string" && v.trim() && !v.includes("[object Object]") ? v.trim() : null);
+
+export function errorText(err, fallback = "Something went wrong") {
+  if (err === null || err === undefined) return fallback;
+  if (typeof err === "string") return usable(err) || fallback;
+  const msg = usable(err.message) || usable(err.error?.message) || usable(err.body?.message);
+  if (msg) return msg;
+  const code = err.code ?? err.error?.code;
+  if (code !== undefined && CODE_TEXT[code]) return CODE_TEXT[code];
+  if (usable(String(code ?? ""))) return `Error: ${code}`;
+  try {
+    const json = JSON.stringify(err);
+    if (json && json !== "{}" && json !== "null") return json.length > 120 ? `${json.slice(0, 117)}…` : json;
+  } catch (_e) { /* circular: fall through */ }
+  return usable(String(err)) || fallback;
+}
+
+// Errors that mean "not ready yet / reconnecting": the first load retries quietly.
+export function isTransient(err) {
+  const code = err?.code ?? err?.error?.code;
+  return code === 1 || code === 3 || code === "unknown_command" || code === "not_loaded";
 }

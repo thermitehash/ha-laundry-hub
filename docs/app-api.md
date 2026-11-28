@@ -107,6 +107,78 @@ Rules:
   it (with `not_clothing` too). Other cards and other garments get `unauthorized`.
 - A card that stops being assigned to the member comes back in `changes` under `deleted`.
 
+## Garments without a tag (0.2.8, capability `untagged_garments`)
+
+A garment no longer needs an NFC tag. Every garment has always had its own `id` (a ULID),
+independent of its tags; `uids` may now be empty. Nothing about existing garments changes
+(ids, tags, photos, history), and every command still accepts a tag UID wherever it takes a
+`garment_id`; answers carry the `id` as well.
+
+New garment fields (additive):
+
+- `tagged`: `false` when `uids` is empty.
+- `state_source`: `"tap"` (a station or phone tap) or `"manual"`; `state_updated`: when.
+- `state_confidence`: how far to trust the laundry state, 0..1. Tagged garments: 1.
+  Untagged: 1 for 2 days after a manual update, fading to 0.25 at 30 days; 0.5 if never
+  set. Use it to weigh an untagged garment's state.
+
+An untagged garment's `location` is `null` (no station has seen it): `state: "put_away"`
+with `location: null` means "clean, somewhere". It's never `missing`, and it's left out of
+the closet, in-wash and drying counts and the bin sensors.
+
+Commands:
+
+- `garment/create` without `uid` (or `uid: null`) creates an untagged garment. `location`
+  must then be empty (`untagged_location`). Members may do this for themselves (owner
+  forced).
+- `garment/manual_state {garment_id, action}` (own): `to_laundry` → in the wash,
+  `put_away` → clean and put away. Untagged garments only (`garment_has_tag`).
+- `garment/attach_tag {garment_id, uid?, replace?, move?}` (own):
+  - With `uid`: attach that tag now. A tag on another garment → `tag_in_use` (the message
+    names it); send `move: true` to move it here (the other garment may become untagged).
+  - Without `uid`: the next **unknown** tap, at any station or from the app, within
+    **2 minutes** links to this garment → `{linked: false, waiting_until}`. `data.link` is
+    `{garment_id, replace, expires}` while waiting (members see only their own). A phone
+    `tap` that completes it answers `{known: true, linked: true, garment, …}`.
+  - `replace: true` removes the garment's current tags first (a lost tag).
+- `garment/attach_cancel {garment_id}` (own): stop waiting.
+- `garment/remove_tag {garment_id, uid?}` (own): remove one tag, or all (back to untagged;
+  history is kept).
+- `unknown/link_candidates {uid?}` (read): untagged garments to link an unknown tag to, the
+  tapper's own garments first, then the newest. Members get only their own.
+
+Members may attach a tag they just tapped with their phone (or one already on another of
+their own garments) to their own garments; anyone else's tag or garment → `unauthorized`.
+
+## Wears (0.2.8, capability `wear_log`)
+
+"Wore it" works on every garment, tagged or not. Garment fields (additive):
+
+- `wear_count`: how many wears are in the log; `last_worn`: ISO time of the latest, or
+  `null`.
+- `worn_since`: set by a wear, `null` again once the garment's laundry state next changes
+  (a tap, or a manual To laundry / Clean). A wear never changes `state` itself.
+
+The wear log is stored per garment as a list of entries. The shape is fixed so that later
+versions only add fields or sources, never migrate:
+
+```json
+{"id": "01JD…", "at": "2026-11-29T08:10:00+00:00", "source": "manual"}
+{"id": "01JD…", "at": "2026-11-29T08:10:00+00:00", "source": "station", "station": "closet_1"}
+```
+
+- `id`: a ULID, the handle for undo and (later) edits.
+- `at`: when it was worn (ISO 8601, UTC).
+- `source`: `manual` ("Wore it") now; `station` arrives in v0.3, with `station`.
+- Unknown keys must be ignored; entries without `at` are skipped by the server.
+
+Commands:
+
+- `garment/wear {garment_id}` (own) → `{wear, garment}`.
+- `garment/wear_undo {garment_id, wear_id}` (own) → the garment. Only `manual` entries;
+  anything else → `unknown_wear`. The panel offers Undo on its toast for 10 s; the server
+  itself has no time limit.
+
 ## Commands
 
 All types are prefixed with `laundry_hub/`. "Policy" is the access rule from the table above:
@@ -123,8 +195,8 @@ What the server supports and who you are.
 
 ```json
 {"api_version": 1, "api_versions_supported": [1], "min_client": 1,
- "integration_version": "0.2.7", "wardrobe_enabled": true,
- "capabilities": ["phone_tap", "changes", "if_rev", "member_enroll", "url_import", "ai_describe", "purchases", "purchase_groups", "purchase_assign"],
+ "integration_version": "0.2.8", "wardrobe_enabled": true,
+ "capabilities": ["phone_tap", "changes", "if_rev", "untagged_garments", "wear_log", "member_enroll", "url_import", "ai_describe", "purchases", "purchase_groups", "purchase_assign"],
  "role": "member", "owner": "person.alex", "app_access": "household", "rev": 412}
 ```
 
@@ -135,7 +207,8 @@ What the server supports and who you are.
   listed with it.
 - `ai_describe` needs an AI Task entity.
 - `url_import` and `ai_describe` need Wardrobe on.
-- v0.3 will add `out_state` and `wear_log`. Show a feature only when its capability is listed.
+- `wear_log` (0.2.8): "Wore it" and the wear fields below. v0.3 will add station wears and
+  `out_state`. Show a feature only when its capability is listed.
 
 ### `hello {client_api_versions?, client_build?}` (read, 0.2.6)
 

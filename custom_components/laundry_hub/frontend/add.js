@@ -14,7 +14,7 @@ function rememberDry(binId, dryId) {
 }
 
 export function reset(state) {
-  state.add = { step: 1, uid: "", manual: false, form: {}, garmentId: null, preview: null, busy: false, seenAt: null, known: null, card: null, askOrder: false };
+  state.add = { step: 1, uid: "", noTag: false, manual: false, form: {}, garmentId: null, preview: null, busy: false, seenAt: null, known: null, card: null, askOrder: false };
 }
 
 // Step 2 starts with "Is this from a recent order?" when unmatched purchase cards exist.
@@ -26,8 +26,9 @@ function enterBasics(ctx, patch) {
 export function onTap(ctx, tap) {
   const add = ctx.state.add;
   if (ctx.state.tab !== "add" || add.step !== 1) return;
+  if (ctx.data.link) return; // "Attach tag" is waiting: that tap links instead
   if (tap.event_type === "unknown") {
-    enterBasics(ctx, { uid: tap.uid, seenAt: tap.station, known: null });
+    enterBasics(ctx, { uid: tap.uid, noTag: false, seenAt: tap.station, known: null });
     ctx.render();
   } else if (tap.garment_id) {
     add.known = tap;
@@ -46,7 +47,10 @@ function stepTag(ctx) {
   const recent = (data.unknown_tags || []).slice(0, 4);
   const known = add.known ? `<div class="card row"><span style="flex:1">That tag already belongs to <strong>${lib.esc(add.known.name)}</strong>.</span>
       <button type="button" class="btn" data-act="openGarment" data-id="${add.known.garment_id}">Open</button></div>` : "";
-  return `<div class="card listen">
+  return `<div class="row wrap" role="group" aria-label="How to add">
+      <button type="button" class="chip tall" aria-pressed="true">Tap a tag</button>
+      <button type="button" class="chip tall" data-act="noTag">No tag (wardrobe only)</button></div>
+    <div class="card listen">
       <div class="ring"><div>${lib.ICON.tag}</div></div>
       <div class="stack" style="gap:6px"><strong style="font-size:20px">Waiting for a tag…</strong>
         <span class="hint" style="font-size:16px">Tap it on any station. The details fill in on their own.</span></div>
@@ -56,16 +60,28 @@ function stepTag(ctx) {
         : `<button type="button" class="link" data-act="manual">Enter tag ID by hand</button>`}
     </div>
     ${known}
-    ${recent.length ? `<h2 class="section-label">Seen recently</h2><div class="chips wrap">${recent.map((t) => `
+    ${recent.length ? `<h2 class="section-label">Seen recently</h2><div class="stack">${recent.map((t) => `<div class="row wrap">
       <button type="button" class="chip tall" data-act="useUid" data-uid="${lib.esc(t.uid)}" data-station="${lib.esc(t.station)}">
-        …${lib.esc(t.uid.slice(-6))} · ${lib.esc(lib.stationLabel(t.station))} · ${lib.esc(lib.timeAgo(t.last_seen))}</button>`).join("")}</div>` : ""}`;
+        …${lib.esc(t.uid.slice(-6))} · ${lib.esc(lib.stationLabel(t.station))} · ${lib.esc(lib.timeAgo(t.last_seen))}</button>
+      ${untagged(ctx).length ? `<button type="button" class="btn small" data-act="openSheet" data-kind="linkTag" data-field="${lib.esc(t.uid)}">Link to an untagged garment…</button>` : ""}</div>`).join("")}</div>` : ""}`;
+}
+
+export const untagged = (ctx) => (ctx.data.garments || []).filter((g) => g.tagged === false);
+
+function tagRow(ctx) {
+  const { lib, state } = ctx;
+  const add = state.add;
+  return add.noTag
+    ? `<div class="card row"><span class="hint">Tag</span><strong>No tag (wardrobe only)</strong><span class="spacer"></span>
+      <button type="button" class="link" data-act="backToTag">Change</button></div>`
+    : `<div class="card row"><span class="hint">Tag</span><strong style="font-family:monospace">${lib.esc(add.uid)}</strong><span class="spacer"></span>
+      <button type="button" class="link" data-act="backToTag">Change</button></div>`;
 }
 
 function stepOrder(ctx) {
   const { lib, data } = ctx;
   const cards = lib.unmatchedCards(data);
-  return `<div class="card row"><span class="hint">Tag</span><strong style="font-family:monospace">${lib.esc(ctx.state.add.uid)}</strong><span class="spacer"></span>
-      <button type="button" class="link" data-act="backToTag">Change</button></div>
+  return `${tagRow(ctx)}
     <h2 class="section-label" style="margin:8px 0 0">Is this from a recent order?</h2>
     <span class="hint">Pick it to fill in the name, brand, size, purchase details and photo.</span>
     <div class="order-row" role="list">${cards.map((c) => `<div role="listitem">${lib.purchaseCard(c, { act: "pickOrder" })}</div>`).join("")}</div>
@@ -92,8 +108,7 @@ function stepBasics(ctx) {
   }
   const people = [{ id: "", name: "No owner" }, ...data.persons.map((p) => ({ id: p.entity_id, name: p.name }))];
   return `<form data-submit="saveBasics" class="stack">${orderBanner(ctx)}
-    <div class="card row"><span class="hint">Tag</span><strong style="font-family:monospace">${lib.esc(add.uid)}</strong><span class="spacer"></span>
-      <button type="button" class="link" data-act="backToTag">Change</button></div>
+    ${tagRow(ctx)}
     <label class="field">Name<input class="input" name="name" data-keep="name" required maxlength="100" autocomplete="off" placeholder="Blue hoodie" value="${lib.esc(f.name || "")}" data-input="formField" data-field="name"></label>
     <div class="field">Owner<div class="people" role="group" aria-label="Owner">${people.map((p) => `
       <button type="button" class="person" data-act="pick" data-field="owner" data-value="${lib.esc(p.id)}" aria-pressed="${(f.owner || "") === p.id}">
@@ -103,9 +118,9 @@ function stepBasics(ctx) {
         <span class="sw" style="background:${lib.rgb(b.color)}"></span>${lib.esc(b.name)}</button>`).join("")}</div></div>
     <div class="field">Dry type<div class="chips wrap" role="group" aria-label="Dry type">${data.dry_types.map((d) => `
       <button type="button" class="chip tall" data-act="pick" data-field="dry_type" data-value="${d.id}" aria-pressed="${dry === d.id}">${lib.esc(d.name)}</button>`).join("")}</div></div>
-    <details class="more" ${loc ? "open" : ""}><summary>Location (optional)</summary>
+    ${add.noTag ? `<span class="hint">Without a tag, its laundry state is set by hand from the garment ("To laundry", "Clean / put away"). You can attach a tag later.</span>` : `<details class="more" ${loc ? "open" : ""}><summary>Location (optional)</summary>
       <div class="chips wrap">${[["", "Not placed yet"], ["closet_1", "Closet 1"], ["closet_2", "Closet 2"]].map(([v, l]) => `
-        <button type="button" class="chip tall" data-act="pick" data-field="location" data-value="${v}" aria-pressed="${loc === v}">${l}</button>`).join("")}</div></details>
+        <button type="button" class="chip tall" data-act="pick" data-field="location" data-value="${v}" aria-pressed="${loc === v}">${l}</button>`).join("")}</div></details>`}
     <button class="btn primary block" ${add.busy ? "disabled" : ""}>${ctx.wardrobe ? "Next" : "Save garment"}</button>
   </form>`;
 }
@@ -210,13 +225,14 @@ export function render(ctx) {
 
 export const actions = {
   manual: (ctx) => { ctx.state.add.manual = true; ctx.render(); },
+  noTag(ctx) { enterBasics(ctx, { uid: "", noTag: true, seenAt: null, known: null }); ctx.render(); },
   manualUid(ctx, form) {
     const uid = new FormData(form).get("uid").toString().trim();
     if (!uid) return;
-    enterBasics(ctx, { uid, seenAt: null });
+    enterBasics(ctx, { uid, noTag: false, seenAt: null });
     ctx.render();
   },
-  useUid(ctx, el) { enterBasics(ctx, { uid: el.dataset.uid, seenAt: el.dataset.station }); ctx.render(); },
+  useUid(ctx, el) { enterBasics(ctx, { uid: el.dataset.uid, noTag: false, seenAt: el.dataset.station }); ctx.render(); },
   pickOrder(ctx, el) {
     const card = (ctx.data.purchases?.cards || []).find((c) => c.id === el.dataset.card);
     if (!card) return;
@@ -243,10 +259,12 @@ export const actions = {
     f.name = new FormData(form).get("name").toString().trim();
     const bin = f.wash_bin || data.wash_bins[0].id;
     const dry = f.dry_type || lastDry(bin) || data.dry_types[0].id;
-    const loc = f.location ?? (["closet_1", "closet_2"].includes(add.seenAt) ? add.seenAt : "");
+    const loc = add.noTag ? "" : f.location ?? (["closet_1", "closet_2"].includes(add.seenAt) ? add.seenAt : "");
     add.busy = true;
     ctx.render();
-    const res = await ctx.ws("garment/create", { uid: add.uid, name: f.name, wash_bin: bin, dry_type: dry, owner: f.owner || null, location: loc || null });
+    const payload = { name: f.name, wash_bin: bin, dry_type: dry, owner: f.owner || null, location: loc || null };
+    if (!add.noTag) payload.uid = add.uid;
+    const res = await ctx.ws("garment/create", payload);
     add.busy = false;
     if (!res) { ctx.render(); return; }
     rememberDry(bin, dry);

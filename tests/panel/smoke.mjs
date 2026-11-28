@@ -39,6 +39,7 @@ function data(wardrobe) {
     w(garment("g02", "Red sweater", { state: "in_wash", location: "laundry" }), desc("top", "sweater", ["red"])),
     w(garment("g03", "Grey hoodie", { missing: true, owner: null }), null, { needs_review: true }),
     w(garment("g04", "Black leggings", { state: "drying", location: "laundry", recent_taps: [{ time: iso(120), station: "laundry", event: "drying", mode: "auto", repeat: false }] }), desc("bottom", "leggings", ["navy"], { rise: "high", sleeve_length: "n/a" })),
+    w(garment("g06", "Linen shirt", { uids: [], tagged: false, location: null, last_seen: null, recent_taps: [], state_source: "manual", state_updated: iso(60 * 24 * 10), state_confidence: 0.7 }), desc("top", "button-down", ["cream"])),
     w(garment("g05", "White button-down", { location: "closet_2", wash_bin: "b2" }), desc("top", "button-down", ["navy"]), { purchase: { store: "Target", purchased_on: "2026-11-20", price: 8, currency: "USD", product_url: "https://target.example/p", order_ref: "T-9", source: "email" } }),
   ];
   return {
@@ -94,12 +95,18 @@ function data(wardrobe) {
 const failures = [];
 const fail = (msg) => { console.error("FAIL:", msg); failures.push(msg); };
 
-async function setup(browser, viewport, wardrobe) {
+async function setup(browser, viewport, wardrobe, opts = {}) {
   const context = await browser.newContext({ viewport, deviceScaleFactor: 1 });
   const page = await context.newPage();
   const errors = [];
+  const logged = []; // the panel's own "Laundry Hub: <command> failed" logs (handled errors)
+  const dialogs = [];
+  page.on("dialog", (d) => { dialogs.push(d.message()); d.accept(); });
   page.on("pageerror", (e) => errors.push(String(e)));
-  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  page.on("console", (m) => {
+    if (m.type() !== "error") return;
+    if (m.text().startsWith("Laundry Hub: ")) logged.push(m.text()); else errors.push(m.text());
+  });
   await page.route("http://hub.test/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/laundry") {
@@ -113,17 +120,28 @@ async function setup(browser, viewport, wardrobe) {
     return route.fulfill({ status: 404, body: "" });
   });
   await page.goto("http://hub.test/laundry");
-  await page.evaluate(async ({ payload }) => {
+  await page.evaluate(async ({ payload, opts }) => {
     window.__calls = [];
     window.__listeners = {};
     window.__payload = payload;
+    window.__failData = opts.failData || 0; // the first N data calls reject like a reconnect
+    window.__slowData = 0;
     const hass = {
       themes: { darkMode: false },
       callWS: async (msg) => {
         window.__calls.push(msg);
-        if (msg.type === "laundry_hub/data") return JSON.parse(JSON.stringify(window.__payload));
+        if (msg.type === "laundry_hub/data") {
+          if (window.__failData > 0) { window.__failData -= 1; throw { code: 3 }; }
+          if (window.__slowData) await new Promise((r) => setTimeout(r, window.__slowData));
+          return JSON.parse(JSON.stringify(window.__payload));
+        }
         if (msg.type === "laundry_hub/garment/create" && msg.uid === "bad") throw { message: "Invalid tag UID bad" };
         if (msg.type === "laundry_hub/garment/create") return { ...payload.garments[0], id: "g01" };
+        if (msg.type === "laundry_hub/garment/attach_tag" && msg.uid === "INUSE" && !msg.move) throw { code: "tag_in_use", message: "That tag belongs to Red sweater; move it here instead?" };
+        if (msg.type === "laundry_hub/garment/attach_tag") return msg.uid ? { linked: true, garment: payload.garments[0] } : { linked: false, waiting_until: new Date(Date.now() + 120000).toISOString() };
+        if (msg.type === "laundry_hub/garment/wear") return { wear: { id: "w1", at: new Date().toISOString(), source: "manual" }, garment: payload.garments.find((g) => g.id === msg.garment_id) };
+        if (msg.type === "laundry_hub/garment/wear_undo") return payload.garments.find((g) => g.id === msg.garment_id);
+        if (msg.type === "laundry_hub/unknown/link_candidates") return { garments: payload.garments.filter((g) => g.tagged === false) };
         return { moved: 1, updated: 1 };
       },
       fetchWithAuth: async () => ({ ok: true, json: async () => payload.garments[0] }),
@@ -136,9 +154,9 @@ async function setup(browser, viewport, wardrobe) {
     const el = document.createElement("laundry-hub-panel");
     document.body.appendChild(el);
     el.hass = hass;
-  }, { payload: data(wardrobe) });
+  }, { payload: data(wardrobe), opts });
   await page.waitForFunction(() => document.querySelector("laundry-hub-panel")?.shadowRoot?.querySelector("main .page-head"));
-  return { context, page, errors };
+  return { context, page, errors, logged, dialogs };
 }
 
 const sr = (page, fn, arg) => page.evaluate(([f, a]) => {
@@ -156,11 +174,21 @@ async function shot(page, name) { await page.screenshot({ path: path.join(SHOTS,
 
 const browser = await chromium.launch();
 for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
-  const { context, page, errors } = await setup(browser, { width: vw, height: vh }, true);
+  const { context, page, errors, dialogs } = await setup(browser, { width: vw, height: vh }, true);
 
   // Home
   let t = await text(page);
   for (const s of ["Laundry Hub", "Closet 1", "Darks", "Drying", "Missing (not seen in 14 days)"]) if (!t.includes(s)) fail(`${tag} home: missing "${s}"`);
+  // v0.2.8: Purchases is easy to find: a Home card with the count, a Closet tab badge.
+  if (!t.includes("Purchases · 4 to review")) fail(`${tag} home: purchases card count`);
+  const badgeText = await sr(page, "return root.querySelector('.tabbar [data-tab=closet] .tab-badge, .segmented [data-tab=closet] .tab-badge')?.textContent || ''");
+  if (badgeText !== "4") fail(`${tag}: closet tab badge ${badgeText}`);
+  await click(page, '[data-act="openPurchases"]'); await settle(page);
+  t = await text(page);
+  if (!t.includes("Match to garment") || !t.includes("All garments")) fail(`${tag}: home card did not open Purchases`);
+  if (!(await page.evaluate(() => window.location.search)).includes("view=purchases")) fail(`${tag}: purchases deep link not written`);
+  await click(page, '[data-act="togglePurchases"]'); await settle(page);
+  await click(page, '[data-act="tab"][data-tab="home"]'); await settle(page);
   if (await page.evaluate(() => window.__xss)) fail(`${tag}: XSS executed`);
   if (await sr(page, "return !!root.querySelector('img[src=x]')")) fail(`${tag}: unescaped HTML`);
   await noHScroll(page, `${tag} home`);
@@ -169,7 +197,7 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   // Closet + filters + select mode
   await click(page, '[data-act="tab"][data-tab="closet"]'); await settle(page);
   t = await text(page);
-  if (!t.includes("Navy cardigan") || !t.includes("5 garments")) fail(`${tag} closet: grid/count wrong`);
+  if (!t.includes("Navy cardigan") || !t.includes("6 garments")) fail(`${tag} closet: grid/count wrong`);
   if (!t.includes("1 need review")) fail(`${tag} closet: needs review count`);
   await noHScroll(page, `${tag} closet`);
   await shot(page, `${tag}-closet`);
@@ -279,6 +307,57 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   await shot(page, `${tag}-detail`);
   await click(page, '[data-act="closeGarment"]'); await settle(page);
 
+  // v0.2.8: a garment without a tag: badge, filter, quick actions, attach / move.
+  t = await text(page);
+  if (!t.includes("No tag") || !t.includes("Tagged")) fail(`${tag}: no-tag badge or filter missing`);
+  await click(page, '[data-act="tagFilter"][data-value="untagged"]'); await settle(page);
+  const untaggedNames = await sr(page, "return [...root.querySelectorAll('.gcard .name')].map(e=>e.textContent).join('|')");
+  if (untaggedNames !== "Linen shirt") fail(`${tag}: No tag filter shows ${untaggedNames}`);
+  await click(page, '[data-act="tagFilter"][data-value="untagged"]'); await settle(page);
+  await click(page, '.gcard[data-id="g06"]'); await settle(page);
+  t = await text(page);
+  for (const s of ["To laundry", "Clean / put away", "Attach tag", "Set by hand", "may be out of date"]) if (!t.includes(s)) fail(`${tag} untagged detail: missing "${s}"`);
+  await noHScroll(page, `${tag} untagged detail`);
+  await shot(page, `${tag}-untagged`);
+  await click(page, '[data-act="manualState"][data-action="to_laundry"]'); await settle(page);
+  let uc = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/manual_state").pop());
+  if (!uc || uc.garment_id !== "g06" || uc.action !== "to_laundry") fail(`${tag}: manual_state ${JSON.stringify(uc)}`);
+  await click(page, '[data-act="attachTag"][data-garment="g06"]'); await settle(page);
+  uc = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/attach_tag").pop());
+  if (!uc || uc.garment_id !== "g06" || uc.uid) fail(`${tag}: attach_tag start ${JSON.stringify(uc)}`);
+  await page.evaluate(() => { window.__payload.link = { garment_id: "g06", replace: false, expires: new Date(Date.now() + 120000).toISOString() }; window.__push({ changed: true }); });
+  await page.waitForTimeout(400);
+  if (!(await text(page)).includes("Waiting for a tap")) fail(`${tag}: attach waiting state`);
+  await sr(page, "root.querySelector('form[data-submit=typedTag] input[name=uid]').value = 'INUSE'; root.querySelector('form[data-submit=typedTag]').requestSubmit();");
+  await page.waitForTimeout(150);
+  if (!(await text(page)).includes("Move tag here")) fail(`${tag}: move offer missing`);
+  await click(page, '[data-act="moveTag"][data-garment="g06"]'); await settle(page);
+  uc = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/attach_tag").pop());
+  if (!uc || uc.uid !== "INUSE" || uc.move !== true) fail(`${tag}: move call ${JSON.stringify(uc)}`);
+  await page.evaluate(() => { window.__payload.link = null; window.__push({ changed: true }); });
+  await page.waitForTimeout(400);
+  // "Move tag here": a picker of tagged garments, one confirm, no typing.
+  await click(page, '[data-act="openSheet"][data-kind="moveTag"][data-field="g06"]'); await settle(page);
+  if (!(await text(page)).includes("Pick the garment the tag is on now")) fail(`${tag}: move-tag picker`);
+  await click(page, '[data-act="pickMoveTag"][data-id="g02"]'); await settle(page);
+  if (!dialogs.some((d) => d === "Move tag from Red sweater to Linen shirt?")) fail(`${tag}: move confirm ${dialogs.join(" | ")}`);
+  uc = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/attach_tag").pop());
+  if (!uc || uc.garment_id !== "g06" || uc.uid !== "04A1B2C3D4E502" || uc.move !== true) fail(`${tag}: move from picker ${JSON.stringify(uc)}`);
+  await click(page, '[data-act="closeGarment"]'); await settle(page);
+  await click(page, '.gcard[data-id="g01"]'); await settle(page);
+  t = await text(page);
+  if (!t.includes("Replace tag") || !t.includes("Remove tag") || !t.includes("Move tag here") || t.includes("Clean / put away")) fail(`${tag}: tagged detail tag section`);
+  // "Wore it" on a tagged garment, with Undo on the toast.
+  if (!t.includes("Wore it") || !t.includes("Not worn yet")) fail(`${tag}: wore-it on tagged garment`);
+  await click(page, '[data-act="woreIt"][data-garment="g01"]'); await page.waitForTimeout(200);
+  uc = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/wear").pop());
+  if (!uc || uc.garment_id !== "g01") fail(`${tag}: wear call ${JSON.stringify(uc)}`);
+  if (!(await sr(page, "return root.querySelector('.toast .toast-action')?.textContent || ''")).includes("Undo")) fail(`${tag}: no Undo on the wear toast`);
+  await click(page, '[data-act="toastAction"]'); await page.waitForTimeout(200);
+  uc = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/wear_undo").pop());
+  if (!uc || uc.garment_id !== "g01" || uc.wear_id !== "w1") fail(`${tag}: wear undo ${JSON.stringify(uc)}`);
+  await click(page, '[data-act="closeGarment"]'); await settle(page);
+
   // Add: listening, then a live unknown tap fills the UID
   await click(page, '[data-act="tab"][data-tab="add"]'); await settle(page);
   if (!(await text(page)).includes("Waiting for a tag")) fail(`${tag}: add step 1`);
@@ -307,13 +386,29 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   if (!matched || matched.card_id !== "p1" || matched.garment_id !== "g01") fail(`${tag}: card not matched after create ${JSON.stringify(matched)}`);
   if (!created || created.uid !== "11223344" || created.location !== "closet_1" || created.wash_bin !== "b1") fail(`${tag}: create payload ${JSON.stringify(created)}`);
   if (!(await text(page)).includes("Photos")) fail(`${tag}: wardrobe step not shown`);
+  // v0.2.8: "No tag (wardrobe only)" creates without a uid; a seen tag can link to an untagged garment.
+  await click(page, '[data-act="addAnother"]').catch(() => {}); await settle(page);
+  await click(page, '[data-act="tab"][data-tab="add"]'); await settle(page);
+  t = await text(page);
+  if (!t.includes("No tag (wardrobe only)") || !t.includes("Link to an untagged garment")) fail(`${tag}: add no-tag / link options`);
+  await click(page, '[data-act="openSheet"][data-kind="linkTag"][data-field="AABBCCDD"]'); await page.waitForTimeout(150);
+  await click(page, '[data-act="linkTag"][data-id="g06"]'); await settle(page);
+  uc = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/attach_tag").pop());
+  if (!uc || uc.uid !== "AABBCCDD" || uc.garment_id !== "g06") fail(`${tag}: link unknown tag ${JSON.stringify(uc)}`);
+  await click(page, '[data-act="noTag"]'); await settle(page);
+  await click(page, '[data-act="noOrder"]').catch(() => {}); await settle(page);
+  if (!(await text(page)).includes("No tag (wardrobe only)")) fail(`${tag}: no-tag basics`);
+  await sr(page, "root.querySelector('input[name=name]').value = 'Scarf'; root.querySelector('form[data-submit=saveBasics]').requestSubmit();");
+  await page.waitForTimeout(250);
+  const untaggedCreate = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/create").pop());
+  if (!untaggedCreate || "uid" in untaggedCreate || untaggedCreate.location !== null || untaggedCreate.name !== "Scarf") fail(`${tag}: untagged create ${JSON.stringify(untaggedCreate)}`);
 
   // Settings
   await click(page, '[data-act="tab"][data-tab="settings"]'); await settle(page);
   t = await text(page);
   for (const s of ["Stations", "Online", "Offline", "Not set up", "Wardrobe catalog"]) if (!t.includes(s)) fail(`${tag} settings: missing "${s}"`);
   const pe = await sr(page, "return root.querySelector('[data-section=purchase-emails]')?.textContent || ''");
-  for (const s of ["Connected", "Stores", "3", "Last check", "12 min ago", "New cards", "Last problem", "None", "Change in Configure", "1 email couldn't be read · Outdoor Research", "Retry unreadable emails", "Cleaned up: 31 marked not clothing (restorable), 2 health items removed, 10 duplicates grouped"]) if (!pe.includes(s)) fail(`${tag} settings: purchase row missing "${s}"`);
+  for (const s of ["Connected", "Stores", "3", "Last check", "12 min ago", "New cards", "Last problem", "None", "Change in Configure", "1 email couldn't be read · Outdoor Research", "Retry unreadable emails", "Cleaned up: 31 marked not clothing (restorable), 2 health items removed, 10 duplicates grouped", "Archived cards and their photos are deleted 1 year after archiving."]) if (!pe.includes(s)) fail(`${tag} settings: purchase row missing "${s}"`);
   await click(page, '[data-act="cleanupSeen"]'); await settle(page);
   if (!(await page.evaluate(() => window.__calls.some((c) => c.type === "laundry_hub/purchases/cleanup_seen")))) fail(`${tag}: cleanup_seen call`);
   // v0.2.7: the AI was unavailable after the retries: a note and "Reclassify old cards".
@@ -351,6 +446,72 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   if (d.includes("Re-describe") || d.includes("Purchase")) fail("wardrobe off: wardrobe detail shown");
   await shot(page, "phone-wardrobe-off-detail");
   if (errors.length) fail(`wardrobe off: errors ${errors.join(" | ")}`);
+  await context.close();
+}
+
+// v0.2.8: error text never shows "[object Object]"; loads never overlap; a load
+// during a reconnect retries quietly; ?tab=closet&view=purchases opens Purchases.
+{
+  const { context, page, errors, logged } = await setup(browser, { width: 390, height: 844 }, true, { failData: 2 });
+  // The first two data calls failed like a reconnect: no toast, then the data.
+  if (await sr(page, "return Boolean(root.querySelector('.toast'))")) fail("reconnect at startup: a toast was shown");
+  const dataCalls = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/data").length);
+  if (dataCalls !== 3) fail(`reconnect at startup: ${dataCalls} data calls (want 3)`);
+  if (!logged.some((l) => l.includes("laundry_hub/data failed"))) fail("reconnect at startup: raw error not logged");
+  if (!(await text(page)).includes("Purchases · 4 to review")) fail("reconnect at startup: data not shown");
+  // errorText covers HA's message-less rejections.
+  const texts = await page.evaluate(async () => {
+    const lib = await import("/laundry_hub_static/lib.js?v=0.2.0");
+    return [
+      lib.errorText({ code: 3 }),
+      lib.errorText({ error: { code: "not_found", message: "Nested message" } }),
+      lib.errorText({ code: "unknown_command" }),
+      lib.errorText({ foo: { bar: 1 } }),
+      lib.errorText({}),
+      lib.errorText(new Error("Plain error")),
+      lib.errorText({ message: { nested: true } }),
+      String(lib.isTransient({ code: 3 })),
+    ];
+  });
+  const want = ["Lost connection to Home Assistant", "Nested message", "Laundry Hub is still starting"];
+  want.forEach((w, i) => { if (texts[i] !== w) fail(`errorText case ${i}: ${texts[i]}`); });
+  if (texts.some((x) => x.includes("[object Object]"))) fail(`errorText shows [object Object]: ${texts.join(" | ")}`);
+  if (texts[4] !== "Something went wrong" || texts[5] !== "Plain error" || texts[7] !== "true") fail(`errorText fallbacks: ${texts.join(" | ")}`);
+  // Overlapping loads (init, "ready", change events) collapse to one call.
+  const before = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/data").length);
+  await page.evaluate(async () => {
+    window.__slowData = 300;
+    const el = document.querySelector("laundry-hub-panel");
+    const a = el._load();
+    (window.__listeners.ready || []).forEach((fn) => fn());
+    const b = el._load();
+    await Promise.all([a, b]);
+    window.__slowData = 0;
+  });
+  const after = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/data").length);
+  if (after - before !== 1) fail(`overlapping loads made ${after - before} calls`);
+  if (errors.length) fail(`startup/error tests: errors ${errors.join(" | ")}`);
+  await context.close();
+}
+{
+  const { context, page, errors } = await setup(browser, { width: 390, height: 844 }, true);
+  await page.goto("http://hub.test/laundry?tab=closet&view=purchases");
+  await page.evaluate(async ({ payload }) => {
+    const hass = {
+      themes: { darkMode: false },
+      callWS: async (msg) => (msg.type === "laundry_hub/data" ? JSON.parse(JSON.stringify(payload)) : {}),
+      fetchWithAuth: async () => ({ ok: true, json: async () => ({}) }),
+      connection: { subscribeMessage: async () => () => {}, addEventListener: () => {} },
+    };
+    await import("/laundry_hub_static/laundry-panel.js?v=0.2.0");
+    const el = document.createElement("laundry-hub-panel");
+    document.body.appendChild(el);
+    el.hass = hass;
+  }, { payload: data(true) });
+  await page.waitForFunction(() => document.querySelector("laundry-hub-panel")?.shadowRoot?.querySelector("main .page-head"));
+  await settle(page);
+  if (!(await text(page)).includes("Match to garment")) fail("deep link ?tab=closet&view=purchases did not open Purchases");
+  if (errors.length) fail(`deep link: errors ${errors.join(" | ")}`);
   await context.close();
 }
 

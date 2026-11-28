@@ -10,7 +10,9 @@ Roles:
   zones), phone-tap, and edit their own garments' name, notes, photos, size
   and wear_for. From v0.2.6 a member also sees the purchase cards assigned to
   their owner, and may match them to their own garments, dismiss them, or
-  mark them Not clothing. Nothing else.
+  mark them Not clothing. From v0.2.8 a member may create untagged garments
+  for themselves, attach, replace and remove tags on their own garments, and
+  set an untagged garment's laundry state by hand. Nothing else.
 
 Every websocket command declares a ``Policy``; ``check()`` enforces it. HTTP
 photo views use ``can_see_garment`` / ``can_edit_garment``.
@@ -210,6 +212,8 @@ def check(caller: Caller, policy: Policy, hub: LaundryHub, msg: dict[str, Any]) 
         extra = set(msg) - MEMBER_UPDATE_FIELDS - {"id", "type", "garment_id", "if_rev"}
         if extra:
             raise _deny(f"Only an administrator can change {', '.join(sorted(extra))}")
+    elif command == "garment/attach_tag" and msg.get("uid"):
+        _check_member_tag(caller, hub, msg)
     elif command == "garment/wardrobe":
         extra = (
             set(msg) - MEMBER_WARDROBE_FIELDS - {"id", "type", "garment_id", "if_rev"}
@@ -232,6 +236,8 @@ def _check_enrol(caller: Caller, hub: LaundryHub, msg: dict[str, Any]) -> None:
     extra = set(msg) - MEMBER_CREATE_FIELDS - _ENVELOPE
     if extra:
         raise _deny(f"Only an administrator can set {', '.join(sorted(extra))}")
+    if not msg.get("uid"):
+        return  # v0.2.8: an untagged garment for themselves
     uid = str(msg.get("uid", "")).replace(":", "").replace(" ", "").upper()
     if uid not in {t.get("uid") for t in member_unknown_tags(hub, caller)}:
         raise _invalid(
@@ -251,3 +257,26 @@ def _check_purchase(caller: Caller, hub: LaundryHub, msg: dict[str, Any]) -> Non
         garment = hub.resolve_garment(str(msg["garment_id"]))
         if not can_edit_garment(caller, garment):
             raise _deny("You can only match purchases to your own garments")
+
+
+def _check_member_tag(caller: Caller, hub: LaundryHub, msg: dict[str, Any]) -> None:
+    """A member attaching a given tag UID to their own garment (v0.2.8).
+
+    The tag must be the unknown tag they just tapped, or one already on
+    another of their own garments (moving it). Others' tags are refused.
+    """
+    from .models import InvalidUid, normalize_uid  # noqa: PLC0415
+
+    try:
+        uid = normalize_uid(msg.get("uid"))
+    except InvalidUid:
+        return  # the command answers with the validation error
+    holder = hub.catalog.by_uid(uid)
+    if holder is not None:
+        if not can_edit_garment(caller, holder):
+            raise _deny("That tag belongs to someone else's garment")
+        return
+    if uid not in {t.get("uid") for t in member_unknown_tags(hub, caller)}:
+        raise _invalid(
+            "tag_not_yours", "Tap the new tag with your phone first, then attach it"
+        )

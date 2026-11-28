@@ -199,7 +199,8 @@ async def test_archived_view_and_restore(
     old_photo = turtle["photos"][0]
 
     await hub.purchases.async_dismiss(turtle["id"], not_clothing=True)
-    assert not (photo_dir / old_photo).exists()
+    # v0.2.8: "Not clothing" keeps the photo, so Restore needs no download.
+    assert (photo_dir / old_photo).is_file()
     freezer.tick(timedelta(minutes=5))
     chinos["image_url"] = None  # an older card without a stored image link
     await hub.purchases.async_dismiss(chinos["id"])
@@ -213,13 +214,13 @@ async def test_archived_view_and_restore(
     ]
     assert "image_url" not in data["archived"][0]
 
-    # Restore re-fetches the photo through the pinned pipeline and lifts the
-    # "Not clothing" rule for that product.
+    # Restore brings back the same photo file and lifts the "Not clothing"
+    # rule for that product.
     await ws.send_json_auto_id(
         {"type": "laundry_hub/purchases/restore", "card_id": turtle["id"]}
     )
     restored = (await ws.receive_json())["result"]
-    assert restored["status"] == "new" and len(restored["photos"]) == 1
+    assert restored["status"] == "new" and restored["photos"] == [old_photo]
     assert restored["photo_urls"][0]["thumb"].startswith("/api/laundry_hub/photos/")
     assert (photo_dir / restored["photos"][0]).is_file()
     assert hub.purchases.meta["not_clothing"]["lands_end"] == []
