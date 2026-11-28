@@ -71,7 +71,11 @@ class LaundryHubPanel extends HTMLElement {
     const page = params.get("page");
     const tab = params.get("tab") || (page === "enroll" ? "add" : page === "garments" ? "closet" : page === "status" ? "home" : null);
     if (TABS.some((t) => t.id === tab)) this.state.tab = tab;
-    if (params.get("uid")) { this.state.tab = "add"; this.state.add.uid = params.get("uid"); this.state.add.step = 2; }
+    if (page === "link" && params.get("uid")) {
+      // From the unknown-tag notification: link it to a garment without a tag.
+      this.state.tab = "add";
+      this.state.sheet = { kind: "linkTag", field: params.get("uid"), picked: [] };
+    } else if (params.get("uid")) { this.state.tab = "add"; this.state.add.uid = params.get("uid"); this.state.add.step = 2; }
     if (params.get("garment")) this.state.garment = params.get("garment");
   }
 

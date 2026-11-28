@@ -1,3 +1,48 @@
+# Laundry Hub build report: v0.2.8
+- Version: 0.2.8 / Date: 2026-11-29 / Repo: https://github.com/thermitehash/ha-laundry-hub
+- PR: https://github.com/thermitehash/ha-laundry-hub/pull/11 (not merged: one open question on wear tracking). v0.2.7 was merged in PR #10 (`c9e6990`) and released as `v0.2.7`.
+- CI: workflow **Validate** on PR #11 (see the latest run)
+
+## Summary
+- **Garments without a tag:**
+  - `uids` may be empty; ids were already independent ULIDs, so there's no data migration;
+  - old uid refs still work, and answers add `tagged`, `state_source`, `state_updated` and `state_confidence`;
+  - capability `untagged_garments`; `api_version` unchanged.
+- **Creating:** "No tag (wardrobe only)" in Add; "New garment from this" on purchase cards (untagged by default).
+- **Manual states:**
+  - "To laundry" and "Clean / put away"; the location stays unknown;
+  - never missing, and left out of station and bin counts;
+  - `state_confidence` fades a hand-set state from 1 to 0.25 over 30 days.
+- **Tags:**
+  - Attach links the next unknown tap within 2 minutes, at any station or from the app, or takes a typed ID;
+  - Move tag here; Replace tag; Remove tag (history kept).
+- **Unknown tags:** "Link to an untagged garment…" in the notification and on the Add page, with a ranked picker.
+- **Members:** create untagged garments for themselves, set manual states, and attach/replace/remove tags on their own garments.
+- **Not clothing** keeps the card's photos; archived and dismissed cards are purged with their photos after a year.
+- **v0.2.6 release notes:** "Install v0.2.7 or later instead" line added.
+
+## Tests
+- 386 pytest (coverage 95 %).
+- New `tests/test_v028.py` (7):
+  - migration keeps ids, tags, photos, history and entity unique_ids, and old uid refs work;
+  - create untagged from the panel API and from a purchase card;
+  - manual states, counts and sensors ignore untagged garments, the freshness weighting, never missing;
+  - attach, the 2-minute window, tag_in_use → move, replace, remove;
+  - unknown tag → ranked untagged garments → link;
+  - member rights;
+  - Not clothing → Restore keeps the same photo file, and the purge removes it after a year.
+- The panel smoke test covers:
+  - the No tag badge and filter;
+  - quick actions; attach, waiting, then the conflict → Move tag here; Replace/Remove on a tagged garment;
+  - No tag in Add; Link from *Seen recently*.
+
+## Needs a person
+- Add a garment without a tag, set "To laundry" / "Clean / put away", then Attach tag by tapping it at a station within 2 minutes.
+- Tap a brand-new tag: the notification offers "Link to an untagged garment…".
+- Edit the published v0.2.6 release page to add the "Install v0.2.7 or later instead" line (the file is updated; the page isn't regenerated).
+
+---
+
 # Laundry Hub build report: v0.2.7
 - Version: 0.2.7 / Date: 2026-11-28 / Repo: https://github.com/thermitehash/ha-laundry-hub
 - PR: https://github.com/thermitehash/ha-laundry-hub/pull/10. v0.2.6 was merged in PR #9 (`f5f2288`); it wasn't installed on Heather's HA.

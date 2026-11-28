@@ -107,6 +107,49 @@ Rules:
   it (with `not_clothing` too). Other cards and other garments get `unauthorized`.
 - A card that stops being assigned to the member comes back in `changes` under `deleted`.
 
+## Garments without a tag (0.2.8, capability `untagged_garments`)
+
+A garment no longer needs an NFC tag. Every garment has always had its own `id` (a ULID),
+independent of its tags; `uids` may now be empty. Nothing about existing garments changes
+(ids, tags, photos, history), and every command still accepts a tag UID wherever it takes a
+`garment_id`; answers carry the `id` as well.
+
+New garment fields (additive):
+
+- `tagged`: `false` when `uids` is empty.
+- `state_source`: `"tap"` (a station or phone tap) or `"manual"`; `state_updated`: when.
+- `state_confidence`: how far to trust the laundry state, 0..1. Tagged garments: 1.
+  Untagged: 1 for 2 days after a manual update, fading to 0.25 at 30 days; 0.5 if never
+  set. Use it to weigh an untagged garment's state.
+
+An untagged garment's `location` is `null` (no station has seen it): `state: "put_away"`
+with `location: null` means "clean, somewhere". It's never `missing`, and it's left out of
+the closet, in-wash and drying counts and the bin sensors.
+
+Commands:
+
+- `garment/create` without `uid` (or `uid: null`) creates an untagged garment. `location`
+  must then be empty (`untagged_location`). Members may do this for themselves (owner
+  forced).
+- `garment/manual_state {garment_id, action}` (own): `to_laundry` → in the wash,
+  `put_away` → clean and put away. Untagged garments only (`garment_has_tag`).
+- `garment/attach_tag {garment_id, uid?, replace?, move?}` (own):
+  - With `uid`: attach that tag now. A tag on another garment → `tag_in_use` (the message
+    names it); send `move: true` to move it here (the other garment may become untagged).
+  - Without `uid`: the next **unknown** tap, at any station or from the app, within
+    **2 minutes** links to this garment → `{linked: false, waiting_until}`. `data.link` is
+    `{garment_id, replace, expires}` while waiting (members see only their own). A phone
+    `tap` that completes it answers `{known: true, linked: true, garment, …}`.
+  - `replace: true` removes the garment's current tags first (a lost tag).
+- `garment/attach_cancel {garment_id}` (own): stop waiting.
+- `garment/remove_tag {garment_id, uid?}` (own): remove one tag, or all (back to untagged;
+  history is kept).
+- `unknown/link_candidates {uid?}` (read): untagged garments to link an unknown tag to, the
+  tapper's own garments first, then the newest. Members get only their own.
+
+Members may attach a tag they just tapped with their phone (or one already on another of
+their own garments) to their own garments; anyone else's tag or garment → `unauthorized`.
+
 ## Commands
 
 All types are prefixed with `laundry_hub/`. "Policy" is the access rule from the table above:
@@ -123,8 +166,8 @@ What the server supports and who you are.
 
 ```json
 {"api_version": 1, "api_versions_supported": [1], "min_client": 1,
- "integration_version": "0.2.7", "wardrobe_enabled": true,
- "capabilities": ["phone_tap", "changes", "if_rev", "member_enroll", "url_import", "ai_describe", "purchases", "purchase_groups", "purchase_assign"],
+ "integration_version": "0.2.8", "wardrobe_enabled": true,
+ "capabilities": ["phone_tap", "changes", "if_rev", "untagged_garments", "member_enroll", "url_import", "ai_describe", "purchases", "purchase_groups", "purchase_assign"],
  "role": "member", "owner": "person.alex", "app_access": "household", "rev": 412}
 ```
 

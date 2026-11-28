@@ -8,7 +8,7 @@ const EVENT_LABEL = { in_wash: "Into the wash", drying: "To drying", put_away: "
 
 function statusChip(ctx, g) {
   const where = ctx.lib.whereLabel(g, ctx.zoneName);
-  const text = g.state === "put_away" ? `In ${where.text}` : where.long || where.text;
+  const text = g.state === "put_away" && g.location ? `In ${where.text}` : where.long || where.text;
   return `<span class="status-chip ${g.missing ? "warn" : ""}">${ctx.lib.esc(g.missing ? `Missing · ${text}` : text)}</span>`;
 }
 
@@ -122,6 +122,38 @@ function wardrobeSection(ctx, g) {
         ${p.product_url ? `<div class="kv"><span>Link</span><span><a href="${lib.esc(p.product_url)}" target="_blank" rel="noopener noreferrer">Product page</a></span></div>` : ""}`}</div>`;
 }
 
+// v0.2.8: tags are optional. Untagged garments get quick actions; any
+// garment can attach (next unknown tap within 2 minutes, or a typed ID),
+// replace or remove a tag.
+function quickActions(ctx, g) {
+  const { lib } = ctx;
+  if (g.tagged !== false) return "";
+  const when = g.state_updated ? `Set by hand ${lib.timeAgo(g.state_updated)}` : "Not set yet";
+  const stale = g.state_updated && g.state_confidence < 1 ? " · may be out of date" : "";
+  return `<div class="card stack" data-section="quick-actions"><div class="stack" style="gap:2px"><strong>Laundry</strong><span class="sub">${lib.esc(when + stale)}</span></div>
+    <div class="row wrap"><button type="button" class="btn" data-act="manualState" data-garment="${g.id}" data-action="to_laundry" aria-pressed="${g.state === "in_wash"}">To laundry</button>
+      <button type="button" class="btn" data-act="manualState" data-garment="${g.id}" data-action="put_away" aria-pressed="${g.state === "put_away"}">Clean / put away</button></div></div>`;
+}
+
+function tagSection(ctx, g) {
+  const { lib, data, state } = ctx;
+  const waiting = data.link && data.link.garment_id === g.id;
+  const conflict = state.tagConflict && state.tagConflict.garment === g.id ? state.tagConflict : null;
+  const tags = (g.uids || []).map((u) => `<span class="chip static" style="font-family:monospace">${lib.esc(u)}</span>`).join("");
+  const body = waiting
+    ? `<div class="tagbox"><strong>Waiting for a tap…</strong><span class="hint">Tap the tag on any station or with the app (until ${lib.esc(new Date(data.link.expires).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}).</span>
+        <form data-submit="typedTag" data-garment="${g.id}" class="row wrap"><input class="input" name="uid" placeholder="Or type the tag ID" autocomplete="off" style="flex:1 1 160px"><button class="btn">Attach</button></form>
+        <button type="button" class="btn" data-act="cancelAttach" data-garment="${g.id}">Cancel</button></div>`
+    : g.tagged === false
+      ? `<div class="row wrap"><span class="notag-inline">No tag</span><span class="spacer"></span><button type="button" class="btn primary" data-act="attachTag" data-garment="${g.id}">Attach tag</button></div>`
+      : `<div class="row wrap">${tags}<span class="spacer"></span>
+          <button type="button" class="btn" data-act="attachTag" data-garment="${g.id}" data-replace="1">Replace tag</button>
+          <button type="button" class="btn" data-act="removeTag" data-garment="${g.id}">Remove tag</button></div>`;
+  const move = conflict ? `<div class="row wrap"><span style="flex:1">That tag belongs to <strong>${lib.esc(conflict.name)}</strong>.</span>
+      <button type="button" class="btn primary" data-act="moveTag" data-garment="${g.id}">Move tag here</button></div>` : "";
+  return `<div class="card stack" data-section="tag"><strong>Tag</strong>${body}${move}</div>`;
+}
+
 export function render(ctx) {
   const { lib, state } = ctx;
   const g = ctx.garment(state.garment);
@@ -140,6 +172,7 @@ export function render(ctx) {
         <div class="stack" style="gap:4px;min-width:0"><h1 style="margin:0;font-size:24px">${lib.esc(g.name)}</h1>
           <span class="sub">${lib.esc(owner)} · <span class="dot" style="display:inline-block;vertical-align:middle;background:${lib.rgb(bin?.color)}"></span> ${lib.esc(ctx.zoneName(g.wash_bin))} · ${lib.esc(ctx.zoneName(g.dry_type))}</span></div>
         ${statusChip(ctx, g)}</div>
+      ${quickActions(ctx, g)}${tagSection(ctx, g)}
       ${state.editing === "basics" ? basicsForm(ctx, g) : ""}
       ${ctx.wardrobe ? wardrobeSection(ctx, g) : photosOff}
       ${g.notes && state.editing !== "basics" ? `<div class="card"><span class="sub">Notes</span><p style="margin:4px 0 0">${lib.esc(g.notes)}</p></div>` : ""}
@@ -164,8 +197,53 @@ function readDesc(form, g) {
   return out;
 }
 
+async function attachCall(ctx, payload) {
+  // Called directly so a "tag_in_use" answer can offer "Move tag here".
+  try {
+    return await ctx.hass.callWS({ type: "laundry_hub/garment/attach_tag", ...payload });
+  } catch (err) {
+    if (err && err.code === "tag_in_use") {
+      ctx.state.tagConflict = { garment: payload.garment_id, uid: payload.uid, replace: Boolean(payload.replace), name: (err.message || "").replace(/^That tag belongs to (.*?);.*$/, "$1") };
+      ctx.render();
+      return null;
+    }
+    ctx.toast(err?.message || String(err), true);
+    return null;
+  }
+}
+
 export const actions = {
   closeGarment: (ctx) => ctx.close(),
+  async manualState(ctx, el) {
+    const res = await ctx.ws("garment/manual_state", { garment_id: el.dataset.garment, action: el.dataset.action });
+    if (res) { ctx.toast(el.dataset.action === "to_laundry" ? "In the laundry" : "Clean and put away"); ctx.reload(); }
+  },
+  async attachTag(ctx, el) {
+    ctx.state.tagConflict = null;
+    const res = await attachCall(ctx, { garment_id: el.dataset.garment, replace: el.dataset.replace === "1" });
+    if (res) ctx.reload();
+  },
+  async typedTag(ctx, form) {
+    const uid = new FormData(form).get("uid").toString().trim();
+    if (!uid) return;
+    const replace = Boolean(ctx.data.link?.replace);
+    const res = await attachCall(ctx, { garment_id: form.dataset.garment, uid, replace });
+    if (res) { ctx.toast("Tag attached"); ctx.reload(); }
+  },
+  async moveTag(ctx, el) {
+    const c = ctx.state.tagConflict;
+    if (!c) return;
+    const res = await attachCall(ctx, { garment_id: el.dataset.garment, uid: c.uid, replace: c.replace, move: true });
+    if (res) { ctx.state.tagConflict = null; ctx.toast("Tag moved here"); ctx.reload(); }
+  },
+  async cancelAttach(ctx, el) {
+    if (await ctx.ws("garment/attach_cancel", { garment_id: el.dataset.garment })) ctx.reload();
+  },
+  async removeTag(ctx, el) {
+    const g = ctx.garment(el.dataset.garment);
+    if (!g || !window.confirm(`Remove the tag from ${g.name}? Its history is kept, and its laundry state is then set by hand.`)) return;
+    if (await ctx.ws("garment/remove_tag", { garment_id: g.id })) { ctx.toast("Tag removed"); ctx.reload(); }
+  },
   toggleMenu: (ctx) => ctx.update({ menu: !ctx.state.menu }),
   editBasics: (ctx) => ctx.update({ editing: "basics", menu: false }),
   editDesc: (ctx) => ctx.update({ editing: "desc" }),

@@ -71,6 +71,23 @@ number of garments. Move them first with **Laundry Hub panel → Garments → Bu
 If an in-use entry is deleted through the generic subentry menu (which cannot be blocked),
 Laundry Hub restores it immediately and raises a repair issue that explains what to do.
 
+## Garments without a tag (0.2.8)
+
+A garment doesn't need an NFC tag. In **Add**, choose **No tag (wardrobe only)**, or use
+**New garment from this** on a purchase card. Untagged garments have the same photos,
+details, AI description and fit as any other, with a small "No tag" badge and a
+**Tagged / No tag** filter in Closet.
+
+- Their laundry state is set by hand from the garment: **To laundry** and **Clean / put
+  away**. Laundry Hub never guesses where they are, never calls them missing, and leaves
+  them out of the closet and bin counts.
+- **Attach tag** later: the next unknown tap at any station (or from the app) within
+  2 minutes links to that garment, or type the tag's ID. A tag that's already on another
+  garment offers **Move tag here**. **Replace tag** (lost tag) and **Remove tag** (back to
+  untagged; history is kept) are on every tagged garment.
+- An unknown tag's notification and the Add page's *Seen recently* list also offer
+  **Link to an untagged garment…**.
+
 ## Laundry Hub panel
 
 The **Laundry Hub** sidebar panel (at `/laundry`) is admin-only and built for phones first: a bottom tab bar on

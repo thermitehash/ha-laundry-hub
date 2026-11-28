@@ -39,6 +39,7 @@ function data(wardrobe) {
     w(garment("g02", "Red sweater", { state: "in_wash", location: "laundry" }), desc("top", "sweater", ["red"])),
     w(garment("g03", "Grey hoodie", { missing: true, owner: null }), null, { needs_review: true }),
     w(garment("g04", "Black leggings", { state: "drying", location: "laundry", recent_taps: [{ time: iso(120), station: "laundry", event: "drying", mode: "auto", repeat: false }] }), desc("bottom", "leggings", ["navy"], { rise: "high", sleeve_length: "n/a" })),
+    w(garment("g06", "Linen shirt", { uids: [], tagged: false, location: null, last_seen: null, recent_taps: [], state_source: "manual", state_updated: iso(60 * 24 * 10), state_confidence: 0.7 }), desc("top", "button-down", ["cream"])),
     w(garment("g05", "White button-down", { location: "closet_2", wash_bin: "b2" }), desc("top", "button-down", ["navy"]), { purchase: { store: "Target", purchased_on: "2026-11-20", price: 8, currency: "USD", product_url: "https://target.example/p", order_ref: "T-9", source: "email" } }),
   ];
   return {
@@ -124,6 +125,9 @@ async function setup(browser, viewport, wardrobe) {
         if (msg.type === "laundry_hub/data") return JSON.parse(JSON.stringify(window.__payload));
         if (msg.type === "laundry_hub/garment/create" && msg.uid === "bad") throw { message: "Invalid tag UID bad" };
         if (msg.type === "laundry_hub/garment/create") return { ...payload.garments[0], id: "g01" };
+        if (msg.type === "laundry_hub/garment/attach_tag" && msg.uid === "INUSE" && !msg.move) throw { code: "tag_in_use", message: "That tag belongs to Red sweater; move it here instead?" };
+        if (msg.type === "laundry_hub/garment/attach_tag") return msg.uid ? { linked: true, garment: payload.garments[0] } : { linked: false, waiting_until: new Date(Date.now() + 120000).toISOString() };
+        if (msg.type === "laundry_hub/unknown/link_candidates") return { garments: payload.garments.filter((g) => g.tagged === false) };
         return { moved: 1, updated: 1 };
       },
       fetchWithAuth: async () => ({ ok: true, json: async () => payload.garments[0] }),
@@ -169,7 +173,7 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   // Closet + filters + select mode
   await click(page, '[data-act="tab"][data-tab="closet"]'); await settle(page);
   t = await text(page);
-  if (!t.includes("Navy cardigan") || !t.includes("5 garments")) fail(`${tag} closet: grid/count wrong`);
+  if (!t.includes("Navy cardigan") || !t.includes("6 garments")) fail(`${tag} closet: grid/count wrong`);
   if (!t.includes("1 need review")) fail(`${tag} closet: needs review count`);
   await noHScroll(page, `${tag} closet`);
   await shot(page, `${tag}-closet`);
@@ -279,6 +283,41 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   await shot(page, `${tag}-detail`);
   await click(page, '[data-act="closeGarment"]'); await settle(page);
 
+  // v0.2.8: a garment without a tag: badge, filter, quick actions, attach / move.
+  t = await text(page);
+  if (!t.includes("No tag") || !t.includes("Tagged")) fail(`${tag}: no-tag badge or filter missing`);
+  await click(page, '[data-act="tagFilter"][data-value="untagged"]'); await settle(page);
+  const untaggedNames = await sr(page, "return [...root.querySelectorAll('.gcard .name')].map(e=>e.textContent).join('|')");
+  if (untaggedNames !== "Linen shirt") fail(`${tag}: No tag filter shows ${untaggedNames}`);
+  await click(page, '[data-act="tagFilter"][data-value="untagged"]'); await settle(page);
+  await click(page, '.gcard[data-id="g06"]'); await settle(page);
+  t = await text(page);
+  for (const s of ["To laundry", "Clean / put away", "Attach tag", "Set by hand", "may be out of date"]) if (!t.includes(s)) fail(`${tag} untagged detail: missing "${s}"`);
+  await noHScroll(page, `${tag} untagged detail`);
+  await shot(page, `${tag}-untagged`);
+  await click(page, '[data-act="manualState"][data-action="to_laundry"]'); await settle(page);
+  let uc = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/manual_state").pop());
+  if (!uc || uc.garment_id !== "g06" || uc.action !== "to_laundry") fail(`${tag}: manual_state ${JSON.stringify(uc)}`);
+  await click(page, '[data-act="attachTag"][data-garment="g06"]'); await settle(page);
+  uc = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/attach_tag").pop());
+  if (!uc || uc.garment_id !== "g06" || uc.uid) fail(`${tag}: attach_tag start ${JSON.stringify(uc)}`);
+  await page.evaluate(() => { window.__payload.link = { garment_id: "g06", replace: false, expires: new Date(Date.now() + 120000).toISOString() }; window.__push({ changed: true }); });
+  await page.waitForTimeout(400);
+  if (!(await text(page)).includes("Waiting for a tap")) fail(`${tag}: attach waiting state`);
+  await sr(page, "root.querySelector('form[data-submit=typedTag] input[name=uid]').value = 'INUSE'; root.querySelector('form[data-submit=typedTag]').requestSubmit();");
+  await page.waitForTimeout(150);
+  if (!(await text(page)).includes("Move tag here")) fail(`${tag}: move offer missing`);
+  await click(page, '[data-act="moveTag"][data-garment="g06"]'); await settle(page);
+  uc = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/attach_tag").pop());
+  if (!uc || uc.uid !== "INUSE" || uc.move !== true) fail(`${tag}: move call ${JSON.stringify(uc)}`);
+  await page.evaluate(() => { window.__payload.link = null; window.__push({ changed: true }); });
+  await page.waitForTimeout(400);
+  await click(page, '[data-act="closeGarment"]'); await settle(page);
+  await click(page, '.gcard[data-id="g01"]'); await settle(page);
+  t = await text(page);
+  if (!t.includes("Replace tag") || !t.includes("Remove tag") || t.includes("Clean / put away")) fail(`${tag}: tagged detail tag section`);
+  await click(page, '[data-act="closeGarment"]'); await settle(page);
+
   // Add: listening, then a live unknown tap fills the UID
   await click(page, '[data-act="tab"][data-tab="add"]'); await settle(page);
   if (!(await text(page)).includes("Waiting for a tag")) fail(`${tag}: add step 1`);
@@ -307,6 +346,22 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   if (!matched || matched.card_id !== "p1" || matched.garment_id !== "g01") fail(`${tag}: card not matched after create ${JSON.stringify(matched)}`);
   if (!created || created.uid !== "11223344" || created.location !== "closet_1" || created.wash_bin !== "b1") fail(`${tag}: create payload ${JSON.stringify(created)}`);
   if (!(await text(page)).includes("Photos")) fail(`${tag}: wardrobe step not shown`);
+  // v0.2.8: "No tag (wardrobe only)" creates without a uid; a seen tag can link to an untagged garment.
+  await click(page, '[data-act="addAnother"]').catch(() => {}); await settle(page);
+  await click(page, '[data-act="tab"][data-tab="add"]'); await settle(page);
+  t = await text(page);
+  if (!t.includes("No tag (wardrobe only)") || !t.includes("Link to an untagged garment")) fail(`${tag}: add no-tag / link options`);
+  await click(page, '[data-act="openSheet"][data-kind="linkTag"][data-field="AABBCCDD"]'); await page.waitForTimeout(150);
+  await click(page, '[data-act="linkTag"][data-id="g06"]'); await settle(page);
+  uc = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/attach_tag").pop());
+  if (!uc || uc.uid !== "AABBCCDD" || uc.garment_id !== "g06") fail(`${tag}: link unknown tag ${JSON.stringify(uc)}`);
+  await click(page, '[data-act="noTag"]'); await settle(page);
+  await click(page, '[data-act="noOrder"]').catch(() => {}); await settle(page);
+  if (!(await text(page)).includes("No tag (wardrobe only)")) fail(`${tag}: no-tag basics`);
+  await sr(page, "root.querySelector('input[name=name]').value = 'Scarf'; root.querySelector('form[data-submit=saveBasics]').requestSubmit();");
+  await page.waitForTimeout(250);
+  const untaggedCreate = await page.evaluate(() => window.__calls.filter((c) => c.type === "laundry_hub/garment/create").pop());
+  if (!untaggedCreate || "uid" in untaggedCreate || untaggedCreate.location !== null || untaggedCreate.name !== "Scarf") fail(`${tag}: untagged create ${JSON.stringify(untaggedCreate)}`);
 
   // Settings
   await click(page, '[data-act="tab"][data-tab="settings"]'); await settle(page);

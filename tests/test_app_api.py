@@ -313,6 +313,11 @@ def payloads(hub: LaundryHub, gid: str) -> dict[str, dict[str, Any]]:
         "purchases/cleanup_seen": {},
         "purchases/reclassify": {},
         "hello": {"client_api_versions": [1], "client_build": 1},
+        "garment/manual_state": {"garment_id": gid, "action": "to_laundry"},
+        "garment/attach_tag": {"garment_id": gid},
+        "garment/attach_cancel": {"garment_id": gid},
+        "garment/remove_tag": {"garment_id": gid, "uid": "DEADBEEF"},
+        "unknown/link_candidates": {},
     }
 
 
@@ -342,6 +347,8 @@ async def test_every_command_declares_a_policy(hass: HomeAssistant) -> None:
         "garment/create", "garment/update", "garment/wardrobe",
         "photo/upload", "photo/delete", "photo/remove", "photo/reorder",
         "purchases/match", "purchases/dismiss", "hello",
+        "garment/manual_state", "garment/attach_tag", "garment/attach_cancel",
+        "garment/remove_tag", "unknown/link_candidates",
     }  # fmt: skip
 
 

@@ -10,11 +10,12 @@ export const STATION_LABEL = { laundry: "Laundry room", closet_1: "Closet 1", cl
 export const stationLabel = (station) => {
   const s = String(station || "");
   if (s.startsWith("phone:")) return `Phone · ${s.slice(6) || "phone"}`;
+  if (s === "manual") return "By hand";
   return STATION_LABEL[s] || s;
 };
 export const LOCATION_LABEL = {
   closet_1: "Closet 1", closet_2: "Closet 2", in_wash: "In wash", drying: "Drying",
-  new: "Not placed", missing: "Missing",
+  new: "Not placed", missing: "Missing", put_away: "Put away",
 };
 export const WEAR_FOR_LABEL = {
   any: "Anything", work: "Work", off_duty: "Never to work", occasion: "Occasions", athletic: "Athletic",
@@ -93,7 +94,7 @@ export const capitalize = (text) => String(text || "").replace(/^./, (c) => c.to
 // Where a garment is, as a short label and whether it needs attention.
 export const whereLabel = (g, zoneName) => {
   if (g.missing) return { text: "Missing", warn: true };
-  if (g.state === "put_away") return { text: STATION_LABEL[g.location] || g.location, warn: false };
+  if (g.state === "put_away") return { text: g.location ? STATION_LABEL[g.location] || g.location : "Put away", warn: false };
   if (g.state === "in_wash") return { text: "In wash", warn: false, long: `In wash · ${zoneName(g.wash_bin)}` };
   if (g.state === "drying") return { text: "Drying", warn: false, long: `Drying · ${zoneName(g.dry_type)}` };
   return { text: "Not placed", warn: false };

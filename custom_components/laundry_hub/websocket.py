@@ -232,6 +232,9 @@ def filter_for(caller: Caller, hub: LaundryHub, data: dict[str, Any]) -> dict[st
         for t in member_unknown_tags(hub, caller)
     ]
     data["last_unknown"] = None
+    session = hub._link
+    if session is None or session.user_id != caller.user_id:
+        data["link"] = None  # only their own "waiting for a tap"
     data["owners"] = {
         k: v for k, v in (data.get("owners") or {}).items() if k == caller.owner
     }
@@ -631,7 +634,7 @@ def ws_subscribe(
         vol.Required("type"): f"{DOMAIN}/garment/create",
         vol.Optional("if_rev"): _rev,
         vol.Optional("if_revs"): _revs,
-        vol.Required("uid"): _str,
+        vol.Optional("uid"): vol.Any(None, "", _str),  # v0.2.8: omit for no tag
         vol.Required("name"): _str,
         vol.Required("wash_bin"): _str,
         vol.Required("dry_type"): _str,
@@ -648,10 +651,14 @@ async def ws_create(
     msg: _Msg,
     hub: LaundryHub,
 ) -> Any:
-    """Create a garment (a member: for their own owner, from their own tap)."""
+    """Create a garment, with or without a tag.
+
+    A member creates for their own owner: with the tag they just tapped, or
+    untagged (v0.2.8).
+    """
     caller = caller_of(msg)
     garment = hub.enroll(
-        uid=msg["uid"],
+        uid=msg.get("uid") or None,
         name=msg["name"],
         wash_bin=msg["wash_bin"],
         dry_type=msg["dry_type"],
@@ -660,6 +667,138 @@ async def ws_create(
         location=msg.get("location") or None,
     )
     return hub.garment_view(garment)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/garment/manual_state",
+        vol.Optional("if_rev"): _rev,
+        vol.Optional("if_revs"): _revs,
+        vol.Required("garment_id"): _str,
+        vol.Required("action"): vol.In(["to_laundry", "put_away"]),
+    }
+)
+@websocket_api.async_response
+@_with_hub(Policy.OWN_GARMENT)
+async def ws_manual_state(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """An untagged garment's quick actions: To laundry, Clean / put away."""
+    garment = hub.resolve_garment(msg["garment_id"])
+    hub.set_manual_state(garment, msg["action"])
+    return hub.garment_view(garment)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/garment/attach_tag",
+        vol.Optional("if_rev"): _rev,
+        vol.Optional("if_revs"): _revs,
+        vol.Required("garment_id"): _str,
+        vol.Optional("uid"): vol.Any(None, "", _str),
+        vol.Optional("replace", default=False): bool,
+        vol.Optional("move", default=False): bool,
+    }
+)
+@websocket_api.async_response
+@_with_hub(Policy.OWN_GARMENT)
+async def ws_attach_tag(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Attach a tag: a given UID now, or the next unknown tap within 2 minutes.
+
+    ``replace`` swaps out the garment's tags (a lost tag). A tag on another
+    garment is refused with ``tag_in_use`` unless ``move``.
+    """
+    garment = hub.resolve_garment(msg["garment_id"])
+    if msg.get("uid"):
+        hub.attach_tag(garment, msg["uid"], replace=msg["replace"], move=msg["move"])
+        return {"linked": True, "garment": hub.garment_view(garment)}
+    expires = hub.start_link(
+        garment, replace=msg["replace"], user_id=caller_of(msg).user_id
+    )
+    return {"linked": False, "waiting_until": expires.isoformat()}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/garment/attach_cancel",
+        vol.Required("garment_id"): _str,
+    }
+)
+@websocket_api.async_response
+@_with_hub(Policy.OWN_GARMENT)
+async def ws_attach_cancel(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Stop waiting for a tap for this garment."""
+    garment = hub.resolve_garment(msg["garment_id"])
+    status = hub.link_status()
+    if status and status["garment_id"] == garment.id:
+        hub.cancel_link()
+    return {}
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/garment/remove_tag",
+        vol.Optional("if_rev"): _rev,
+        vol.Optional("if_revs"): _revs,
+        vol.Required("garment_id"): _str,
+        vol.Optional("uid"): vol.Any(None, "", _str),
+    }
+)
+@websocket_api.async_response
+@_with_hub(Policy.OWN_GARMENT)
+async def ws_remove_tag(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Remove one tag, or every tag (back to untagged; history is kept)."""
+    garment = hub.resolve_garment(msg["garment_id"])
+    hub.remove_tag(garment, msg.get("uid") or None)
+    return hub.garment_view(garment)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/unknown/link_candidates",
+        vol.Optional("uid"): vol.Any(None, "", _str),
+    }
+)
+@websocket_api.async_response
+@_with_hub(Policy.READ)
+async def ws_link_candidates(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Untagged garments to link an unknown tag to, most likely first."""
+    caller = caller_of(msg)
+    garments = hub.link_candidates(
+        msg.get("uid") or None, owner=None if caller.is_admin else caller.owner
+    )
+    sign = _signer(hass, connection)
+    out = []
+    for garment in garments:
+        if not can_see_garment(caller, garment):
+            continue
+        view = hub.garment_view(garment)
+        _sign_garment(view, sign)
+        out.append(view)
+    return {"garments": out}
 
 
 @websocket_api.websocket_command(
@@ -1227,7 +1366,7 @@ async def ws_hello(
 
 def capabilities(hub: LaundryHub) -> list[str]:
     """Features the app may show (more arrive in later versions)."""
-    caps = ["phone_tap", "changes", "if_rev"]
+    caps = ["phone_tap", "changes", "if_rev", "untagged_garments"]
     if app_access(hub) == ACCESS_HOUSEHOLD:
         caps.append("member_enroll")
     if hub.wardrobe.enabled:
@@ -1416,6 +1555,11 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_owner_update,
         ws_purchases_suggest,
         ws_hello,
+        ws_manual_state,
+        ws_attach_tag,
+        ws_attach_cancel,
+        ws_remove_tag,
+        ws_link_candidates,
         ws_purchases_set_quantity,
         ws_purchases_split,
         ws_purchases_merge,

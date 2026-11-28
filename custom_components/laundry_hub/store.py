@@ -115,9 +115,12 @@ def sanitize_garment(garment: Garment) -> list[str]:
     an error, so stored data is normalized to the nearest valid state.
     """
     fixes: list[str] = []
+    untagged_unknown = not garment.uids and garment.location is None
     if garment.state not in STORED_STATES:
         fixes.append(f"state {garment.state!r} -> new")
         garment.state, garment.location = STATE_NEW, None
+    elif untagged_unknown:
+        pass  # v0.2.8: an untagged garment's location is honestly unknown
     elif garment.state == STATE_PUT_AWAY and garment.location not in CLOSET_STATIONS:
         fixes.append(f"put_away at {garment.location!r} -> new")
         garment.state, garment.location = STATE_NEW, None
@@ -382,7 +385,7 @@ class Catalog:
     def add(
         self,
         *,
-        uid: str,
+        uid: str | None,
         name: str,
         wash_bin: str,
         dry_type: str,
@@ -392,12 +395,12 @@ class Catalog:
         state: str = STATE_NEW,
         now: datetime | None = None,
     ) -> Garment:
-        """Add a garment."""
-        uid = normalize_uid(uid)
-        self._check_uids_free([uid], None)
+        """Add a garment (``uid`` None: untagged, v0.2.8)."""
+        uids = [normalize_uid(uid)] if uid else []
+        self._check_uids_free(uids, None)
         garment = Garment(
             id=ulid_now(),
-            uids=[uid],
+            uids=uids,
             name=name,
             owner=owner,
             wash_bin=wash_bin,
@@ -408,10 +411,11 @@ class Catalog:
             created=now or dt_util.utcnow(),
         )
         self.garments[garment.id] = garment
-        self.uid_index[uid] = garment.id
-        self.unknown_tags.pop(uid, None)
-        if self.last_unknown and self.last_unknown.get("uid") == uid:
-            self.last_unknown = None
+        for tag in uids:
+            self.uid_index[tag] = garment.id
+            self.unknown_tags.pop(tag, None)
+            if self.last_unknown and self.last_unknown.get("uid") == tag:
+                self.last_unknown = None
         self.schedule_save()
         return garment
 
@@ -429,12 +433,14 @@ class Catalog:
         self.schedule_save()
         return garment
 
-    def remove_uid(self, garment_id: str, uid: str) -> Garment:
-        """Detach a tag from a garment (never the last one)."""
+    def remove_uid(
+        self, garment_id: str, uid: str, *, allow_last: bool = False
+    ) -> Garment:
+        """Detach a tag (the last one only with ``allow_last``: back to untagged)."""
         garment = self.get(garment_id)
         uid = normalize_uid(uid)
         if uid in garment.uids:
-            if len(garment.uids) == 1:
+            if len(garment.uids) == 1 and not allow_last:
                 raise LastTag(uid)
             garment.uids.remove(uid)
             self.uid_index.pop(uid, None)

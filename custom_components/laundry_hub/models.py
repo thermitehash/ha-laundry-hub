@@ -70,7 +70,7 @@ _KNOWN_KEYS = frozenset(
         "description_confidence", "description_ai", "description_model",
         "description_updated", "wear_for", "uniform", "recent_taps", "lifecycle",
         "lifecycle_changed", "sale_price", "wear_log", "out_since", "fit_feedback",
-        "fit_score", "skip_count", "last_suggested",
+        "fit_score", "skip_count", "last_suggested", "state_source", "state_updated",
     }
 )  # fmt: skip
 MAX_RECENT_TAPS = 10
@@ -110,6 +110,10 @@ class Garment:
     lifecycle: str = "active"
     lifecycle_changed: datetime | None = None
     sale_price: float | None = None
+    # v0.2.8: how the laundry state was last set ("tap" or "manual") and when.
+    # Untagged garments only ever change by hand.
+    state_source: str | None = None
+    state_updated: datetime | None = None
     # Reserved for v0.3 (stored, never used or shown in v0.2)
     wear_log: list[Any] = field(default_factory=list)
     out_since: datetime | None = None
@@ -118,6 +122,11 @@ class Garment:
     skip_count: int = 0
     last_suggested: datetime | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def tagged(self) -> bool:
+        """Has at least one NFC tag (v0.2.8: tags are optional)."""
+        return bool(self.uids)
 
     @property
     def photo(self) -> str | None:
@@ -160,6 +169,8 @@ class Garment:
             "lifecycle": self.lifecycle,
             "lifecycle_changed": _iso(self.lifecycle_changed),
             "sale_price": self.sale_price,
+            "state_source": self.state_source,
+            "state_updated": _iso(self.state_updated),
             "wear_log": list(self.wear_log),
             "out_since": _iso(self.out_since),
             "fit_feedback": list(self.fit_feedback),
@@ -207,6 +218,8 @@ class Garment:
             lifecycle=str(data.get("lifecycle") or "active"),
             lifecycle_changed=_dt(data.get("lifecycle_changed")),
             sale_price=data.get("sale_price"),
+            state_source=data.get("state_source"),
+            state_updated=_dt(data.get("state_updated")),
             wear_log=list(data.get("wear_log") or []),
             out_since=_dt(data.get("out_since")),
             fit_feedback=list(data.get("fit_feedback") or []),
@@ -230,13 +243,19 @@ def garment_problems(garment: Garment, zone_ids: set[str]) -> list[str]:
         problems.append(f"wash_bin {garment.wash_bin} does not exist")
     if garment.dry_type not in zone_ids:
         problems.append(f"dry_type {garment.dry_type} does not exist")
-    if not garment.uids:
-        problems.append("garment has no tag")
-    if garment.state == STATE_PUT_AWAY and garment.location not in CLOSET_STATIONS:
+    # v0.2.8: a garment may have no tag. Its state is set by hand, and its
+    # location is unknown (None) unless a station saw it.
+    unknown_ok = not garment.uids and garment.location is None
+    if (
+        garment.state == STATE_PUT_AWAY
+        and garment.location not in CLOSET_STATIONS
+        and not unknown_ok
+    ):
         problems.append(f"put_away with location {garment.location}")
     if (
         garment.state in (STATE_IN_WASH, STATE_DRYING)
         and garment.location != STATION_LAUNDRY
+        and not unknown_ok
     ):
         problems.append(f"{garment.state} with location {garment.location}")
     if garment.state == STATE_NEW and garment.location is not None:

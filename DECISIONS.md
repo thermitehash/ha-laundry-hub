@@ -1,3 +1,49 @@
+# Decisions (v0.2.8)
+
+Choices made while building v0.2.8 without asking. Each line: decision, then reason.
+
+1. **No data migration was needed.**
+   - Every garment already had its own ULID `id`, independent of its tags, since the v0.2 store. `uids` is a list, and an untagged garment simply has an empty one.
+   - Ids, storage keys, photo filenames (which use the id), recent taps, `wear_log` and entity unique_ids are untouched. There are no per-garment entities, and the sensors' unique_ids don't depend on garments.
+   - Two new stored fields, `state_source` and `state_updated`, default to null. A v0.2.7 store loads unchanged, and the test checks that every other stored key is identical after a reload.
+2. **Old uid-style refs keep working everywhere** (`resolve_garment` already accepted an id or a tag UID). Views add `tagged`, `state_source`, `state_updated` and `state_confidence`. This is additive, so `api_version` stays 1. Capability: `untagged_garments`.
+3. **"Never claim a location you don't know":**
+   - An untagged garment's `location` is always null. `put_away` with a null location means "clean, somewhere", shown as "Put away".
+   - The validity rules and the store's auto-repair accept that for untagged garments only. Creating an untagged garment with a location is refused (`untagged_location`).
+   - Removing a garment's last tag clears its location, since no station can vouch for it any more.
+4. **Untagged garments are never "missing"** (no station can see them), and they're left out of `count()` and `per_zone()`, so they never appear in the closet, in-wash or drying sensors or the bin counts. Unknown-tag flows only ever deal with tags, so untagged garments don't affect them.
+5. **Manual actions:**
+   - `garment/manual_state` takes `to_laundry` (in the wash) or `put_away` (clean / put away). It works on untagged garments only (`garment_has_tag`); a tagged garment changes state through its taps.
+   - Each action is written to recent taps as "By hand", so the history shows it.
+   - Members may use it on their own garments.
+6. **`state_confidence` (0..1):**
+   - Tagged garments: 1.
+   - Untagged: 1 for 2 days after a manual update, then fading linearly to 0.25 at 30 days. Never set: 0.5.
+   - The constants live in hub.py. The panel shows "may be out of date" once it drops below 1.
+7. **Linking a tag:**
+   - The brief's "existing link session" doesn't exist in the code, so `start_link` adds a small server-side one: one session at a time (a new one replaces the old), lasting 2 minutes.
+   - The next *unknown* tap at any station, or a member's/admin's phone tap, links to that garment instead of becoming an unknown tag (no notification).
+   - A known tag's tap is processed normally, never moved silently. Moving a tag happens only through the explicit `uid` + `move` path ("Move tag here").
+   - A member's session is completed only by an admin's or that member's own phone tap; a station tap completes any session.
+8. **Attach by typed ID:** `garment/attach_tag` with `uid` attaches immediately and refuses a tag on another garment with `tag_in_use`, which names that garment. `move: true` moves the tag, and the other garment may become untagged. `replace: true` removes the garment's current tags first.
+9. **"Remove tag" removes all tags** (back to untagged; recent taps and the wear log are kept). `uid` removes just one. The old "never the last tag" rule now applies only to `garment/update remove_uid`, which is unchanged.
+10. **Link candidates:**
+    - The tag carries no information about the garment, so ranking uses who tapped it: that member's owner's untagged garments come first, then the newest. Type and colour are shown on each row so similar garments are easy to spot.
+    - Only active (not archived) untagged garments are offered. Members get only their own.
+11. **The unknown-tag notification** adds a second action, "Link to an untagged garment…" (`?page=link&uid=…`), only when untagged garments exist. The panel opens the picker from that link.
+12. **"New garment from this"** creates an untagged garment named after the card, using the first wash bin and dry type and the card's assigned owner. It matches one unit of the card, then opens the garment for editing.
+13. **The panel's quick actions and tag controls live on the garment's detail card.** The Closet grid shows the "No tag" badge, and Tagged / No tag filter chips appear once any untagged garment exists.
+14. **Member rights for tags:**
+    - A typed tag must be the unknown tag the member just tapped with their phone, or a tag already on another of their own garments.
+    - Moving a tag from someone else's garment is refused.
+    - Creating without a tag skips the "recent tap" requirement; the owner is still forced.
+15. **"Not clothing" keeps the card's photos**; a plain Dismiss and auto-archiving still delete them, as before.
+16. **New purge:** archived and dismissed cards (with their photos) are deleted 365 days after they were archived or dismissed. The brief says photos go when an archived card is purged, but no purge existed.
+    - The "Not clothing" rules and the seen Message-IDs stay, so a purged card never comes back.
+    - Matched cards are never purged.
+17. **The v0.2.6 release notes file gets the "Install v0.2.7 or later instead" line under its title**: line 1 must stay the title for the version check. The published v0.2.6 release page isn't regenerated by the Release workflow (it skips existing releases), and no available tool edits a release body.
+18. **Wear tracking, outfit suggestions and the bedside "graveyard"** don't exist yet (v0.3). How far to go is asked as an open question. Untagged garments already carry everything those features will need: manual state, `state_updated` and `state_confidence`.
+
 # Decisions (v0.2.7)
 
 Choices made while building v0.2.7 without asking. Each line: decision, then reason.
