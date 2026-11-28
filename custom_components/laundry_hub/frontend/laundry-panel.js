@@ -230,7 +230,7 @@ class LaundryHubPanel extends HTMLElement {
     const body = this.data ? view.render(ctx) : `<div class="card empty"><p>Laundry Hub isn't loaded yet.</p></div>`;
     root.innerHTML = `
       <div class="app">
-        <div class="topbar"><strong style="font-size:20px">Laundry</strong><nav class="segmented" aria-label="Sections">${tabs("segmented")}</nav></div>
+        <div class="topbar"><strong style="font-size:20px">Laundry Hub</strong><nav class="segmented" aria-label="Sections">${tabs("segmented")}</nav></div>
         <main>${body}</main>
         <nav class="tabbar" aria-label="Sections">${tabs("tabbar")}</nav>
         ${this.state.garment && this.data ? this.mods.detail.render(ctx) : ""}

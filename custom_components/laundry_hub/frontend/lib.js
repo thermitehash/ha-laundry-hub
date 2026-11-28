@@ -1,4 +1,4 @@
-// Shared helpers for the Laundry panel views. No dependencies.
+// Shared helpers for the Laundry Hub panel views. No dependencies.
 
 export const esc = (value) =>
   String(value ?? "").replace(/[&<>"']/g, (c) => ({

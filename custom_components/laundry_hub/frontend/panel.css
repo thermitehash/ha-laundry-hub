@@ -1,4 +1,4 @@
-/* Laundry panel styles. Tokens: tokens.css. Phone first (390 px); >= 900 px two columns. */
+/* Laundry Hub panel styles. Tokens: tokens.css. Phone first (390 px); >= 900 px two columns. */
 :host {
   display: block;
   min-height: 100vh;

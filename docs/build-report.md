@@ -29,6 +29,12 @@
   - shop ids are learned for user-added names;
   - Gmail adds `from:store+<id>@`;
   - other shops are never body-fetched.
+- **Follow-up A, client compatibility:**
+  - `api_info` adds `api_versions_supported` ([1]) and `min_client` (1);
+  - an optional `laundry_hub/hello {client_api_versions, client_build}` answers `{compatible, reason, api_version}` (plus `min_client` and `api_versions_supported`);
+  - the version policy is documented in docs/app-api.md;
+  - clients that never say hello are unaffected.
+- **Follow-up B, naming:** the sidebar title and panel heading are now "Laundry Hub"; the URL stays `/laundry`. "the Laundry panel" became "the Laundry Hub panel" in strings, README and messages.
 - **Assignment:**
   - per-card and bulk `purchases/assign`, owner filters;
   - suggestions after two similar assignments (never automatic);
@@ -36,8 +42,8 @@
   - capabilities `purchase_assign` and `purchase_groups`.
 
 ## Tests
-- 376 pytest (coverage 95 %).
-- New `tests/test_v026.py` (20):
+- 378 pytest (coverage 95 %).
+- New `tests/test_v026.py` (22):
   - six duplicate patterns → one group each;
   - a later order adds quantity with its own line;
   - locked quantity, split, merge, matching up to N, partial dismiss;
@@ -49,13 +55,16 @@
   - Amalli Talli by name and by shop id, other shops header-only;
   - shop-id learning; Shopify rules;
   - assignment, visibility, member actions and refusals, suggestions, bulk assign, photo access;
-  - classify batches stay within the budget.
-- The panel smoke test covers ×N, the stepper and unlock, split, suggested and manual assign, merge, bulk assign, owner filters, match 1 of N, and the Settings cleanup line.
+  - classify batches stay within the budget;
+  - api_info fields; `hello` answers compatible, client_too_old (old build or dropped version) and server_too_old; a client without hello is unaffected;
+  - the registered panel's sidebar_title is "Laundry Hub" and its url_path is still "laundry".
+- The panel smoke test now expects the "Laundry Hub" heading. It covers ×N, the stepper and unlock, split, suggested and manual assign, merge, bulk assign, owner filters, match 1 of N, and the Settings cleanup line.
 
 ## Needs a person
 - Heather's install: after updating, the first check runs the cleanup. Settings should show "Cleaned up: X non-clothing removed, Y duplicates grouped". The 45 new cards should shrink (the 10 duplicate pairs grouped), and the non-clothing cards should be gone.
 - An Amalli Talli order arriving after the update becomes a card.
 - In the app (when it's built), a family member sees only the cards assigned to them.
+- After updating, the sidebar shows "Laundry Hub" and old /laundry bookmarks still open it.
 
 ---
 

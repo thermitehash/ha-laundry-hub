@@ -311,6 +311,7 @@ def payloads(hub: LaundryHub, gid: str) -> dict[str, dict[str, Any]]:
         "purchases/merge": {"card_id": "c", "other_id": "d"},
         "purchases/assign": {"card_id": "c", "owner": None},
         "purchases/cleanup_seen": {},
+        "hello": {"client_api_versions": [1], "client_build": 1},
     }
 
 
@@ -339,7 +340,7 @@ async def test_every_command_declares_a_policy(hass: HomeAssistant) -> None:
         "data", "api_info", "changes", "subscribe", "photo/url", "tap",
         "garment/create", "garment/update", "garment/wardrobe",
         "photo/upload", "photo/delete", "photo/remove", "photo/reorder",
-        "purchases/match", "purchases/dismiss",
+        "purchases/match", "purchases/dismiss", "hello",
     }  # fmt: skip
 
 

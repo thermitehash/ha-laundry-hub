@@ -67,13 +67,13 @@ First setup seeds **Darks, Lights & whites, Colors, Reds, Delicates** and **Drye
 Lay flat**.
 
 Deleting a bin or dry type that garments still use is blocked, with an error that names the
-number of garments. Move them first with **Laundry panel → Garments → Bulk reassign**.
+number of garments. Move them first with **Laundry Hub panel → Garments → Bulk reassign**.
 If an in-use entry is deleted through the generic subentry menu (which cannot be blocked),
 Laundry Hub restores it immediately and raises a repair issue that explains what to do.
 
-## Laundry panel
+## Laundry Hub panel
 
-The **Laundry** sidebar panel is admin-only and built for phones first: a bottom tab bar on
+The **Laundry Hub** sidebar panel (at `/laundry`) is admin-only and built for phones first: a bottom tab bar on
 phones, a top bar on wide screens. It follows Home Assistant's light and dark mode, and taps,
 moves and new garments appear without a refresh.
 

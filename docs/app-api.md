@@ -8,11 +8,43 @@ source of truth; the sidebar panel uses the same commands.
 - Available from integration **0.2.3**.
 - `api_version` changes only when a field or command is **removed or renamed**. Adding
   fields, commands or capabilities never bumps it, so clients must ignore unknown fields.
+  See **Compatibility** below.
 - Errors use HA's websocket error format: `{"success": false, "error": {"code", "message"}}`.
   Codes the app should handle: `unauthorized`, `conflict` (with extra fields, see below),
   `not_loaded`, `unknown_garment`, `invalid_format`, `no_owner_mapping`, `owner_not_allowed`,
   `tag_not_yours`, `tag_not_enrolled` and `invalid_action`, plus the validation codes listed
   per command.
+
+## Compatibility (0.2.6)
+
+Policy:
+
+- **`api_version`** is the server's preferred API version. It is bumped **only** when a
+  field or command is removed or renamed. Additions (fields, commands, capabilities, error
+  codes) **never** bump it.
+- **`api_versions_supported`** lists every API version this server can still serve
+  (currently `[1]`). When version 2 arrives, the server keeps serving 1 for a while, so
+  older apps keep working.
+- **`min_client`** is the lowest app build the server accepts (starts at `1`). It is raised
+  **only** when a server change would break older builds; adding things never raises it.
+
+Clients may say hello once after connecting (optional; the panel and older apps never do):
+
+```json
+{"type": "laundry_hub/hello", "client_api_versions": [1], "client_build": 42}
+→ {"compatible": true, "reason": null, "api_version": 1,
+   "min_client": 1, "api_versions_supported": [1]}
+```
+
+- `reason` is `client_too_old` (the build is below `min_client`, or the app only speaks
+  versions the server no longer serves), `server_too_old` (the app only speaks newer
+  versions), or `null`.
+- `api_version` is the newest version both sides support. When incompatible, it's the
+  server's preferred one.
+- Both fields are optional; without `client_api_versions` the server assumes `[1]`.
+- On `client_too_old`, ask the user to update the app. On `server_too_old`, ask them to update
+  the Laundry Hub integration. `api_info` carries the same `min_client` and
+  `api_versions_supported`, so a client can also decide on its own.
 
 ## Roles and access
 
@@ -90,7 +122,8 @@ All types are prefixed with `laundry_hub/`. "Policy" is the access rule from the
 What the server supports and who you are.
 
 ```json
-{"api_version": 1, "integration_version": "0.2.6", "wardrobe_enabled": true,
+{"api_version": 1, "api_versions_supported": [1], "min_client": 1,
+ "integration_version": "0.2.6", "wardrobe_enabled": true,
  "capabilities": ["phone_tap", "changes", "if_rev", "member_enroll", "url_import", "ai_describe", "purchases", "purchase_groups", "purchase_assign"],
  "role": "member", "owner": "person.alex", "app_access": "household", "rev": 412}
 ```
@@ -103,6 +136,10 @@ What the server supports and who you are.
 - `ai_describe` needs an AI Task entity.
 - `url_import` and `ai_describe` need Wardrobe on.
 - v0.3 will add `out_state` and `wear_log`. Show a feature only when its capability is listed.
+
+### `hello {client_api_versions?, client_build?}` (read, 0.2.6)
+
+Optional compatibility handshake; see **Compatibility**.
 
 ### `data` (read)
 

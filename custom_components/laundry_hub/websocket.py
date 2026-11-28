@@ -1,4 +1,4 @@
-"""Websocket API used by the Laundry panel. Every write is validated here."""
+"""Websocket API used by the Laundry Hub panel. Every write is validated here."""
 
 from __future__ import annotations
 
@@ -28,8 +28,10 @@ from .access import (
 )
 from .const import (
     API_VERSION,
+    API_VERSIONS_SUPPORTED,
     CLOSET_STATIONS,
     DOMAIN,
+    MIN_CLIENT,
     PHOTO_TYPES,
     PHOTO_URL_TTL_HOURS,
     PHOTOS_URL,
@@ -1141,6 +1143,8 @@ async def ws_api_info(
     caller = caller_of(msg)
     return {
         "api_version": API_VERSION,
+        "api_versions_supported": list(API_VERSIONS_SUPPORTED),
+        "min_client": MIN_CLIENT,
         "integration_version": VERSION,
         "wardrobe_enabled": hub.wardrobe.enabled,
         "capabilities": capabilities(hub),
@@ -1149,6 +1153,57 @@ async def ws_api_info(
         "app_access": "household" if caller.household else "admins",
         "rev": hub.revs.rev,
     }
+
+
+def compatibility(
+    client_versions: list[int] | None, client_build: int | None
+) -> dict[str, Any]:
+    """Whether a client can work with this server (see docs/app-api.md).
+
+    * A build below ``MIN_CLIENT`` is too old.
+    * Otherwise the newest API version both sides support is used. If they
+      share none, the side with only older versions is the one too old.
+    """
+    supported = set(API_VERSIONS_SUPPORTED)
+    wanted = set(client_versions or [API_VERSION])
+    common = supported & wanted
+    if client_build is not None and client_build < MIN_CLIENT:
+        reason: str | None = "client_too_old"
+    elif not common:
+        reason = "server_too_old" if min(wanted) > max(supported) else "client_too_old"
+    else:
+        reason = None
+    return {
+        "compatible": reason is None,
+        "reason": reason,
+        "api_version": max(common) if reason is None else API_VERSION,
+        "min_client": MIN_CLIENT,
+        "api_versions_supported": sorted(supported),
+    }
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): f"{DOMAIN}/hello",
+        vol.Optional("client_api_versions"): vol.All(
+            [vol.All(int, vol.Range(min=1))], vol.Length(min=1, max=20)
+        ),
+        vol.Optional("client_build"): vol.All(int, vol.Range(min=0)),
+    }
+)
+@websocket_api.async_response
+@_with_hub(Policy.READ)
+async def ws_hello(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Optional handshake: the app says what it speaks; the server says if it fits.
+
+    Clients that never call it (the panel, older apps) keep working.
+    """
+    return compatibility(msg.get("client_api_versions"), msg.get("client_build"))
 
 
 def capabilities(hub: LaundryHub) -> list[str]:
@@ -1341,6 +1396,7 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_import_apply,
         ws_owner_update,
         ws_purchases_suggest,
+        ws_hello,
         ws_purchases_set_quantity,
         ws_purchases_split,
         ws_purchases_merge,

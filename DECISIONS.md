@@ -49,7 +49,20 @@ Choices made while building v0.2.6 without asking. Each line: decision, then rea
     - Assign/Suggested, Merge…;
     - owner filter chips;
     - Select → Assign to…;
-    - in the match sheet, the choice "All N for one garment" or "1 of N".
+    - in the match sheet, the choice "All N for one garment" or "1 of N".23. **Follow-up A, client compatibility:**
+    - `api_info` adds `api_versions_supported` ([1]) and `min_client` (1).
+    - The constants live in const.py next to `API_VERSION`.
+    - `hello` takes both fields optionally. `client_api_versions` defaults to [1], so a bare hello is compatible.
+    - A build below `min_client` is `client_too_old`, whatever versions it speaks.
+    - With no shared version: if every client version is newer than every server one, it's `server_too_old`; otherwise `client_too_old`.
+    - The answer also echoes `min_client` and `api_versions_supported`, an addition beyond the brief, so a client has everything in one reply.
+    - `hello` uses the read policy, like `api_info`, so a member locked out by "Admins only" still gets `unauthorized` (a separate signal for the app).
+    - Nothing is stored about clients.
+24. **Follow-up B, naming:**
+    - Only the sidebar title (`PANEL_TITLE`) and the panel's headings (Home page title, wide-screen top bar) changed to "Laundry Hub". The URL path stays `laundry`.
+    - User-facing text that named the panel ("the Laundry panel") now says "the Laundry Hub panel": four strings, one log hint, the media-browser message and the README.
+    - "Laundry" as a station, a zone or a colour name ("Laundry station", "Laundry teal") is unchanged.
+    - No screenshots are committed. CI regenerates them on every run, with the new heading.
 
 # Decisions (v0.2.5)
 

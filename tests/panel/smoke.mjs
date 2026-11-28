@@ -1,4 +1,4 @@
-// Headless smoke test of the Laundry panel (v0.2) against a stub `hass` + websocket.
+// Headless smoke test of the Laundry Hub panel (v0.2) against a stub `hass` + websocket.
 // Run: node tests/panel/smoke.mjs   (needs the `playwright` npm package + Chromium)
 // Screenshots: tests/panel/screenshots/*.png (uploaded as a CI artifact).
 import { createRequire } from "node:module";
@@ -159,7 +159,7 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
 
   // Home
   let t = await text(page);
-  for (const s of ["Laundry", "Closet 1", "Darks", "Drying", "Missing (not seen in 14 days)"]) if (!t.includes(s)) fail(`${tag} home: missing "${s}"`);
+  for (const s of ["Laundry Hub", "Closet 1", "Darks", "Drying", "Missing (not seen in 14 days)"]) if (!t.includes(s)) fail(`${tag} home: missing "${s}"`);
   if (await page.evaluate(() => window.__xss)) fail(`${tag}: XSS executed`);
   if (await sr(page, "return !!root.querySelector('img[src=x]')")) fail(`${tag}: unescaped HTML`);
   await noHScroll(page, `${tag} home`);

@@ -78,5 +78,5 @@ class LaundryHubMediaSource(MediaSource):
         return PlayMedia(f"{PHOTOS_URL}/{filename}", "image/jpeg", path=path)
 
     async def async_browse_media(self, item: MediaSourceItem) -> BrowseMediaSource:
-        """Garment photos are private to the Laundry panel."""
-        raise BrowseError("Laundry Hub photos are only shown in the Laundry panel")
+        """Garment photos are private to the Laundry Hub panel."""
+        raise BrowseError("Laundry Hub photos are only shown in the Laundry Hub panel")

@@ -26,7 +26,7 @@ export function render(ctx) {
   const { lib, data } = ctx;
   const garments = data.garments.filter(active);
   const inWash = garments.filter((g) => g.state === "in_wash");
-  const head = `<div class="page-head"><div><h1>Laundry</h1>
+  const head = `<div class="page-head"><div><h1>Laundry Hub</h1>
       <div class="sub">${garments.length} garment${garments.length === 1 ? "" : "s"} · ${inWash.length} in the wash</div></div>
       <button type="button" class="icon-btn" data-act="tab" data-tab="add" aria-label="Add garment">${lib.ICON.plus}</button></div>`;
 

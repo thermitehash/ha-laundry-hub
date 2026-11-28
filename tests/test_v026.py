@@ -889,3 +889,53 @@ async def test_classify_uses_a_budgeted_structure_in_batches(
         )
     assert calls == [10, 3]
     assert [r["is_apparel"] for r in rows][-2:] == [True, False]
+
+
+# --- client compatibility and naming (v0.2.6 follow-up) -----------------------------
+
+
+async def test_api_info_and_hello_compatibility(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
+    await setup(hass)
+    client = Client(await hass_ws_client(hass))
+    # A client that never says hello (the panel, older apps) works as before.
+    assert (await client("data"))["success"]
+    info = (await client("api_info"))["result"]
+    assert info["api_version"] == 1
+    assert info["api_versions_supported"] == [1]
+    assert info["min_client"] == 1
+
+    async def hello(**payload: Any) -> dict[str, Any]:
+        msg = await client("hello", **payload)
+        assert msg["success"], msg
+        return msg["result"]
+
+    ok = await hello(client_api_versions=[1], client_build=7)
+    assert (ok["compatible"], ok["reason"], ok["api_version"]) == (True, None, 1)
+    assert (await hello())["compatible"]  # nothing sent: assume API 1
+    assert (await hello(client_api_versions=[1, 2]))["api_version"] == 1
+    newer = await hello(client_api_versions=[2, 3], client_build=40)
+    assert (newer["compatible"], newer["reason"]) == (False, "server_too_old")
+    with patch("custom_components.laundry_hub.websocket.MIN_CLIENT", 5):
+        old = await hello(client_api_versions=[1], client_build=4)
+    assert (old["compatible"], old["reason"]) == (False, "client_too_old")
+    with patch(
+        "custom_components.laundry_hub.websocket.API_VERSIONS_SUPPORTED", (2, 3)
+    ):
+        stale = await hello(client_api_versions=[1])
+    assert (stale["compatible"], stale["reason"]) == (False, "client_too_old")
+    assert (await client("hello", client_api_versions=[]))["error"][
+        "code"
+    ] == "invalid_format"
+    # The panel still works after a hello from another client on the same server.
+    assert (await client("data"))["success"]
+
+
+async def test_sidebar_is_laundry_hub_at_the_same_url(hass: HomeAssistant) -> None:
+    from homeassistant.components.frontend import DATA_PANELS  # noqa: PLC0415
+
+    await setup(hass)
+    panel_entry = hass.data[DATA_PANELS]["laundry"]
+    assert panel_entry.sidebar_title == "Laundry Hub"
+    assert panel_entry.frontend_url_path == "laundry"
