@@ -44,33 +44,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Laundry Hub settings",
-        "data": {
-          "laundry_device": "Laundry room station",
-          "closet_1_device": "Closet 1 station",
-          "closet_2_device": "Closet 2 station",
-          "feedback_timeout": "Feedback timeout",
-          "flash_duration": "Light flash duration",
-          "missing_after_days": "Missing after",
-          "notify_target": "Notify target for enrollment prompts",
-          "wardrobe_enabled": "Wardrobe catalog",
-          "ai_task_entity": "AI Task entity for descriptions",
-          "follow_ha_theme": "Follow HA theme colour",
-          "app_access": "App access"
-        },
-        "data_description": {
-          "laundry_device": "ESPHome device of the laundry room tap station (optional until the hardware is flashed).",
-          "closet_1_device": "ESPHome device of the closet 1 tap station.",
-          "closet_2_device": "ESPHome device of the closet 2 tap station.",
-          "feedback_timeout": "How long to wait for a station to accept LED feedback.",
-          "flash_duration": "How long a bin or dry zone light stays on after a tap.",
-          "missing_after_days": "A garment not tapped for this many days is listed as missing.",
-          "notify_target": "A notify entity (notify.xyz) or a notify action such as mobile_app_my_phone.",
-          "wardrobe_enabled": "Adds purchase details, photos and AI descriptions per garment. When describing, photos and descriptions are sent to the chosen AI provider.",
-          "ai_task_entity": "Optional. Used to describe garments from their photos.",
-          "follow_ha_theme": "Use your Home Assistant theme's primary colour instead of Laundry Hub's teal.",
-          "app_access": "Who may use Laundry Hub from the iPhone app (and the API). Admins only keeps today's behaviour. Household also lets other HA users see and tap their own garments; you choose who is who next."
-        },
+        "title": "Laundry Hub",
         "menu_options": {
           "settings": "Main settings",
           "email_account": "Purchase emails",
@@ -474,6 +448,15 @@
     },
     "invalid_action": {
       "message": "{action} isn't possible for this garment."
+    },
+    "no_owner_mapping": {
+      "message": "Your Home Assistant user isn't linked to a person in Laundry Hub. Ask an administrator to set it under App access."
+    },
+    "owner_not_allowed": {
+      "message": "You can only add garments for yourself."
+    },
+    "tag_not_yours": {
+      "message": "Tap the new tag with your phone first, then add it."
     }
   },
   "issues": {

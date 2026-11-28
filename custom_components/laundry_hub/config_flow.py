@@ -392,7 +392,9 @@ class LaundryHubOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Settings form; with Wardrobe on, a menu that adds Purchase emails."""
         if not self._current.get(CONF_WARDROBE_ENABLED):
-            return await self._settings_form("init", user_input)
+            # Plain settings form: its own step, so the menu's {status}
+            # description (purchase emails) never shows without its value.
+            return await self._settings_form("settings", user_input)
         if self.config_entry.data.get(CONF_PURCHASE_EMAIL):
             options = [
                 "settings",

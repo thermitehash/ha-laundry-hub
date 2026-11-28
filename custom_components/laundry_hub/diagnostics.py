@@ -61,7 +61,10 @@ async def async_get_config_entry_diagnostics(
         "garment_count": len(garments),
         "garments": garments,
         "unknown_tags": [
-            {**t, "uid": _mask_uid(str(t.get("uid", "")))}
+            {
+                **{k: v for k, v in t.items() if k != "tapped_by"},
+                "uid": _mask_uid(str(t.get("uid", ""))),
+            }
             for t in hub.catalog.unknown_tags.values()
         ],
         "quarantined_records": len(hub.catalog.quarantine),

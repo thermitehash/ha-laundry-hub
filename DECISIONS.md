@@ -1,3 +1,22 @@
+# Decisions (v0.2.4)
+
+Choices made while building v0.2.4 without asking. Each line: decision, then reason.
+
+1. **Heather's answers to the v0.2.3 questions:**
+   - (a) Members get AI descriptions only through the automatic describe after the first photo on their own garment. It runs server-side with the integration's AI Task entity. Manual describe and re-describe, `describe_fields` and `reset_field` are admin-only.
+   - (b) Members still don't see unmatched purchase cards.
+   - (c) Members may enrol garments for themselves.
+   - (d) Phone taps still can't move a garment to another bin.
+2. **Placeholder fix: with Wardrobe off, the options flow opens the `settings` step (no placeholders) instead of `init`.** `init` is now the Wardrobe-on menu only, so its "Purchase emails: {status}" always has its value. The two steps share the same handler and fields.
+3. **The placeholder test records every form, menu and abort our flows render** (by wrapping HA's `async_show_form`, `async_show_menu` and `async_abort`) and checks them against `strings.json`. A coverage check fails if any step, or any placeholder-bearing abort, in `strings.json` is never rendered, so a new step can't skip the check. Repair issues are checked too.
+4. **Member enrolment needs a recent phone tap of that tag by that member.** The unknown tag records `tapped_by` (the HA user id), and "recent" means within 30 minutes. A station tap clears `tapped_by`. That is how "a member sees only the unknown tag they just tapped" and "uids other than the tapped one stay admin-only" are enforced.
+5. **A member sees at most one unknown tag: their latest phone tap within the window.** "Just tapped" means one tag. Older taps go back to the admins' list.
+6. **The member's owner is forced on create**: no owner, or their own owner, is accepted; any other value gets `owner_not_allowed`, and a member without a mapping gets `no_owner_mapping`. A tag that isn't theirs gets `tag_not_yours`. Admin-only fields (`location`, plus brand, purchase and uniform, which `garment/create` never takes) get `unauthorized`.
+7. **`tapped_by` never leaves the server for members** (removed from their view) **and is removed from diagnostics.** It's another HA user's id.
+8. **The phone tap's unknown answer adds `can_enroll` and `owner` (additive).** The app knows straight away whether to offer "Add it" and for whom.
+9. **`member_enroll` is listed whenever App access is Household**, as the prompt says, even for an admin caller. It describes the server, not the caller.
+10. **Two v0.2.3 test assertions changed, as direct results of this release:** the member-allowed command set (create added; describe_fields and reset_field removed), and the exact unknown-tap answer (new fields). A third replaced a hard-coded "0.2.3" with `VERSION`. Everything else in the suite runs unchanged.
+
 # Decisions (v0.2.3)
 
 Choices made while building v0.2.3 without asking. Each line: decision, then reason.

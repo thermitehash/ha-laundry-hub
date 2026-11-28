@@ -17,10 +17,12 @@ photo views use ``can_see_garment`` / ``can_edit_garment``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.util import dt as dt_util
 
 from .const import CONF_APP_ACCESS, CONF_USER_OWNERS
 
@@ -38,6 +40,13 @@ ROLE_MEMBER = "member"
 # Fields a member may change on their own garments.
 MEMBER_UPDATE_FIELDS = frozenset({"name", "notes"})
 MEMBER_WARDROBE_FIELDS = frozenset({"size", "wear_for"})
+# Fields a member may send when enrolling a garment for themselves (v0.2.4).
+MEMBER_CREATE_FIELDS = frozenset(
+    {"uid", "name", "wash_bin", "dry_type", "notes", "owner"}
+)
+# A member may enrol only the unknown tag they tapped with their phone, recently.
+ENROL_WINDOW = timedelta(minutes=30)
+_ENVELOPE = frozenset({"id", "type", "if_rev", "if_revs"})
 
 
 class Policy(StrEnum):
@@ -47,6 +56,7 @@ class Policy(StrEnum):
     READ = "read"  # anyone allowed in; results filtered to the caller's owner
     OWN_GARMENT = "own_garment"  # admins, or a member acting on their own garment
     TAP = "tap"  # admins, or a member (own garments for actions)
+    ENROL = "enrol"  # admins, or a member creating a garment for themselves
 
 
 class Forbidden(HomeAssistantError):
@@ -122,6 +132,34 @@ def can_edit_garment(caller: Caller, garment: Garment) -> bool:
     return can_see_garment(caller, garment)
 
 
+def member_unknown_tags(
+    hub: LaundryHub, caller: Caller, now: datetime | None = None
+) -> list[dict[str, Any]]:
+    """The unknown tag a member just tapped with their own phone (0 or 1).
+
+    Members never see the household's unknown-tag list; they see only the
+    tag they tapped last, within ``ENROL_WINDOW``, so they can enrol it.
+    """
+    if caller.user_id is None:
+        return []
+    now = now or dt_util.utcnow()
+    mine = []
+    for tag in hub.catalog.unknown_tags.values():
+        if tag.get("tapped_by") != caller.user_id:
+            continue
+        seen = dt_util.parse_datetime(str(tag.get("last_seen") or ""))
+        if seen is not None and now - seen <= ENROL_WINDOW:
+            mine.append(tag)
+    mine.sort(key=lambda t: str(t.get("last_seen")), reverse=True)
+    return mine[:1]
+
+
+def _invalid(key: str, message: str) -> HomeAssistantError:
+    from .hub import validation_error  # noqa: PLC0415 - avoid import cycle
+
+    return validation_error(key, message)
+
+
 def _deny(message: str = "You don't have access to this") -> Forbidden:
     return Forbidden(message)
 
@@ -135,6 +173,9 @@ def check(caller: Caller, policy: Policy, hub: LaundryHub, msg: dict[str, Any]) 
     if policy is Policy.ADMIN:
         raise _deny("Only an administrator can do this")
     if policy is Policy.READ or policy is Policy.TAP:
+        return
+    if policy is Policy.ENROL:
+        _check_enrol(caller, hub, msg)
         return
     # OWN_GARMENT: the garment must be the member's, and only member fields.
     garment = hub.resolve_garment(str(msg.get("garment_id", "")))
@@ -151,3 +192,25 @@ def check(caller: Caller, policy: Policy, hub: LaundryHub, msg: dict[str, Any]) 
         )
         if extra:
             raise _deny(f"Only an administrator can change {', '.join(sorted(extra))}")
+
+
+def _check_enrol(caller: Caller, hub: LaundryHub, msg: dict[str, Any]) -> None:
+    """A member creating a garment: for their own owner, from their own tap."""
+    if caller.owner is None:
+        raise _invalid(
+            "no_owner_mapping",
+            "Your Home Assistant user isn't linked to a person in Laundry Hub; "
+            "ask an administrator to set it under App access",
+        )
+    owner = msg.get("owner")
+    if owner not in (None, "", caller.owner):
+        raise _invalid("owner_not_allowed", "You can only add garments for yourself")
+    extra = set(msg) - MEMBER_CREATE_FIELDS - _ENVELOPE
+    if extra:
+        raise _deny(f"Only an administrator can set {', '.join(sorted(extra))}")
+    uid = str(msg.get("uid", "")).replace(":", "").replace(" ", "").upper()
+    if uid not in {t.get("uid") for t in member_unknown_tags(hub, caller)}:
+        raise _invalid(
+            "tag_not_yours",
+            "Tap the new tag with your phone first, then add it",
+        )

@@ -437,8 +437,10 @@ class LaundryHub:
             uid, station, feedback, decision.event_type, garment.id, decision
         )
 
-    def _unknown_tap(self, station: str, uid: str, now: datetime) -> TapResult:
-        self.catalog.record_unknown(uid, station, now)
+    def _unknown_tap(
+        self, station: str, uid: str, now: datetime, tapped_by: str | None = None
+    ) -> TapResult:
+        self.catalog.record_unknown(uid, station, now, tapped_by)
         if station in STATIONS:  # a phone isn't a station (health)
             self.catalog.record_station_tap(station, now)
         self.notify_changed()
@@ -498,8 +500,18 @@ class LaundryHub:
                     "tag_not_enrolled", "That tag isn't on a garment yet"
                 )
             async with self._tap_lock:
-                self._unknown_tap(origin, uid, now)
-            return {"known": False, "uid": uid, "rev": self.revs.rev}
+                self._unknown_tap(origin, uid, now, caller.user_id)
+            # The tapper may enrol it (members: for themselves, within 30 min).
+            can_enrol = caller.is_admin or (
+                caller.household and caller.owner is not None
+            )
+            return {
+                "known": False,
+                "uid": uid,
+                "can_enroll": can_enrol,
+                "owner": None if caller.is_admin else caller.owner,
+                "rev": self.revs.rev,
+            }
         if not can_see_garment(caller, garment):
             raise Forbidden("That tag belongs to someone else's garment")
         actions = self.available_actions(garment)
