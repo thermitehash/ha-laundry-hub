@@ -19,7 +19,9 @@ function purchaseRow(ctx) {
        <div class="kv"><span>Stores</span><span>${p.stores}</span></div>
        <div class="kv"><span>Last check</span><span>${lib.esc(lib.timeAgo(p.last_check))}</span></div>
        <div class="kv"><span>New cards</span><span>${p.new_cards}</span></div>
-       ${p.cleanup ? `<div class="row wrap" data-section="purchase-cleanup"><span style="flex:1">Cleaned up: ${p.cleanup.removed} non-clothing removed, ${p.cleanup.grouped} duplicates grouped</span>
+       ${p.cleanup?.skipped ? `<div class="row wrap" data-section="purchase-cleanup"><span class="state problem" style="flex:1">Cleanup skipped: AI unavailable — use Reclassify old cards</span>
+         <button type="button" class="btn small" data-act="reclassify" ${ctx.state.busy?.reclassify ? "disabled" : ""}>${ctx.state.busy?.reclassify ? "Reclassifying…" : "Reclassify old cards"}</button></div>`
+         : p.cleanup ? `<div class="row wrap" data-section="purchase-cleanup"><span style="flex:1">Cleaned up: ${p.cleanup.not_clothing} marked not clothing (restorable), ${p.cleanup.health} health items removed, ${p.cleanup.grouped} duplicates grouped</span>
          <button type="button" class="btn small" data-act="cleanupSeen">OK</button></div>` : ""}
        <div class="kv"><span>Last problem</span><span class="${p.last_error ? "state problem" : ""}">${lib.esc(p.last_error || "None")}</span></div>
        ${(p.unreadable || []).length ? `<div class="kv"><span>Couldn't read</span><span class="state problem">${lib.esc(unreadableText(lib, p.unreadable))}</span></div>
@@ -69,6 +71,14 @@ export function render(ctx) {
 }
 
 export const actions = {
+  async reclassify(ctx) {
+    ctx.state.busy = { ...(ctx.state.busy || {}), reclassify: true };
+    ctx.render();
+    const res = await ctx.ws("purchases/reclassify", {});
+    ctx.state.busy = { ...(ctx.state.busy || {}), reclassify: false };
+    if (res) ctx.toast(res.classified ? "Old cards reclassified" : "The AI is still unavailable");
+    ctx.reload();
+  },
   async cleanupSeen(ctx) {
     if (await ctx.ws("purchases/cleanup_seen", {})) ctx.reload();
   },

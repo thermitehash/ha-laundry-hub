@@ -448,11 +448,26 @@ async def test_one_time_cleanup_on_a_store_like_heathers(
         result = await inbox.async_cleanup_once()
         assert await inbox.async_cleanup_once() is None  # runs once
     assert result is not None
-    assert (result["removed"], result["grouped"], result["split"]) == (3, 3, 1)
+    # v0.2.7: non-clothing is marked Not clothing and dismissed (restorable);
+    # health items are still deleted outright.
+    counts = (
+        result["not_clothing"],
+        result["health"],
+        result["grouped"],
+        result["split"],
+    )
+    assert counts == (2, 1, 3, 1)
     assert calls and all(n <= extract.BATCH_SIZE for n in calls)
     assert sum(calls) == 11  # every new and dismissed card, never the matched one
-    assert {"lamp", "pills", "coins"}.isdisjoint(inbox.cards)
-    assert not (photos / "purchase-lamp.jpg").exists()
+    assert "pills" not in inbox.cards
+    lamp, coins = inbox.cards["lamp"], inbox.cards["coins"]
+    assert lamp["status"] == coins["status"] == "dismissed"
+    assert lamp["not_clothing"] and coins["not_clothing"]
+    assert (
+        lamp["photos"] == ["purchase-lamp.jpg"]
+        and (photos / "purchase-lamp.jpg").exists()
+    )
+    assert "desk lamp" in inbox.meta["not_clothing"]["amazon"]
     socks = inbox.cards["s1"]
     assert (
         "s2" not in inbox.cards
@@ -474,25 +489,89 @@ async def test_one_time_cleanup_on_a_store_like_heathers(
         "Ferrosi Pants", "Black", "M", "Regular"
     )  # fmt: skip
     # Shown once in the Settings row, then hidden.
-    assert inbox.status()["cleanup"] == {"removed": 3, "grouped": 3}
+    assert inbox.status()["cleanup"] == {"not_clothing": 2, "health": 1, "grouped": 3}
     inbox.cleanup_seen()
     assert inbox.status()["cleanup"] is None
     # Logged as counts only, never product names.
-    assert "3 non-clothing removed, 3 duplicates grouped" in caplog.text
+    assert (
+        "2 marked not clothing, 1 health items removed, 3 duplicates grouped"
+        in caplog.text
+    )
     for name in ("Desk Lamp", "Allergy", "Coin Blanks", "RUMIA"):
         assert name not in caplog.text
+    # Restore brings a not-clothing card back, photo and all, and lifts the rule.
+    restored = await inbox.async_restore("lamp")
+    assert restored["status"] == "new" and restored["photos"] == ["purchase-lamp.jpg"]
+    assert "not_clothing" not in restored
+    assert "desk lamp" not in inbox.meta["not_clothing"]["amazon"]
 
 
-async def test_cleanup_keeps_cards_when_the_ai_fails(hass: HomeAssistant) -> None:
+async def test_ai_failure_leaves_cleanup_pending_retries_then_gives_up(
+    hass: HomeAssistant, hass_ws_client
+) -> None:
     hub = await setup(hass)
     inbox = hub.purchases
     inbox.cards["lamp"] = stored_card("lamp", "Desk Lamp", "amazon")
-    with patch.object(
-        extract, "_generate_data", AsyncMock(side_effect=HomeAssistantError("down"))
+    inbox.cards["a"] = stored_card("a", "Boot Socks", "duluth", order_ref="WEB1")
+    inbox.cards["b"] = stored_card("b", "Boot Socks", "duluth", order_ref="WEB1")
+    down = AsyncMock(side_effect=HomeAssistantError("down"))
+    with (
+        patch.object(extract, "_generate_data", down),
+        patch.object(inbox, "_async_run", AsyncMock(return_value={"new_cards": 0})),
     ):
+        first = await inbox.async_cleanup_once()  # the startup attempt
+        assert first is not None and first["attempts"] == 1 and not first["gave_up"]
+        assert inbox.cleanup_pending and inbox.status()["cleanup"] is None
+        # Nothing changed: no card dismissed, deleted or grouped.
+        assert set(inbox.cards) == {"lamp", "a", "b"}
+        assert inbox.cards["lamp"]["status"] == "new"
+        # Retried at each of the next 3 checks, then it gives up with a note.
+        for attempt in (2, 3, 4):
+            await inbox.async_check(manual=True)
+            assert inbox.cleanup_state["attempts"] == attempt
+        assert inbox.cleanup_state["gave_up"] and not inbox.cleanup_pending
+        assert inbox.status()["cleanup"] == {"skipped": True}
+        calls = down.await_count
+        await inbox.async_check(manual=True)
+        assert down.await_count == calls  # no more automatic attempts
+    assert set(inbox.cards) == {"lamp", "a", "b"}
+
+    # Settings' "Reclassify old cards" runs it again (now with a working AI).
+    client = Client(await hass_ws_client(hass))
+    gen = classifier({"Desk Lamp"}, set(), [])
+    with patch.object(extract, "_generate_data", AsyncMock(side_effect=gen)):
+        res = (await client("purchases/reclassify"))["result"]
+    assert res == {
+        "classified": True,
+        "cleanup": {"not_clothing": 1, "health": 0, "grouped": 1},
+    }
+    assert inbox.cards["lamp"]["status"] == "dismissed" and "b" not in inbox.cards
+    assert not inbox.cleanup_pending
+    # The button also works while the AI is still down: still the note.
+    with patch.object(extract, "_generate_data", down):
+        res = (await client("purchases/reclassify"))["result"]
+    assert res["classified"] is False and inbox.cleanup_state["attempts"] == 1
+
+
+async def test_v026_store_with_classified_false_runs_again(hass: HomeAssistant) -> None:
+    hub = await setup(hass)
+    inbox = hub.purchases
+    # What v0.2.6 stored when the AI never answered: marked done, not classified.
+    inbox.meta["cleanup"] = {
+        "version": 1, "at": "2026-11-28T15:00:00+00:00", "removed": 0,
+        "grouped": 0, "split": 0, "classified": False, "seen": True,
+    }  # fmt: skip
+    inbox.cards["lamp"] = stored_card("lamp", "Desk Lamp", "amazon")
+    assert inbox.cleanup_pending
+    gen = classifier({"Desk Lamp"}, set(), [])
+    with patch.object(extract, "_generate_data", AsyncMock(side_effect=gen)):
         result = await inbox.async_cleanup_once()
-    assert result is not None and result["removed"] == 0 and not result["classified"]
-    assert "lamp" in inbox.cards  # deletion fails closed
+    assert result is not None and result["classified"] and result["not_clothing"] == 1
+    assert not inbox.cleanup_pending
+    # A store where it really ran stays done.
+    with patch.object(extract, "_generate_data", AsyncMock(side_effect=gen)) as mock:
+        assert await inbox.async_cleanup_once() is None
+    assert mock.await_count == 0
 
 
 # --- never store non-apparel -------------------------------------------------------

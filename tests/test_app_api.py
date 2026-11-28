@@ -311,6 +311,7 @@ def payloads(hub: LaundryHub, gid: str) -> dict[str, dict[str, Any]]:
         "purchases/merge": {"card_id": "c", "other_id": "d"},
         "purchases/assign": {"card_id": "c", "owner": None},
         "purchases/cleanup_seen": {},
+        "purchases/reclassify": {},
         "hello": {"client_api_versions": [1], "client_build": 1},
     }
 

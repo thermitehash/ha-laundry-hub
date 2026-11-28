@@ -73,7 +73,7 @@ function data(wardrobe) {
     persons: [{ entity_id: "person.heather", name: "Heather" }, { entity_id: "person.sam", name: "Sam" }],
     purchases: wardrobe ? {
       connected: true, provider: "gmail", stores: 3, last_check: iso(12), last_error: null, new_cards: 2,
-      cleanup: { removed: 31, grouped: 10 },
+      cleanup: { not_clothing: 31, health: 2, grouped: 10 },
       unreadable: [{ store: "Outdoor Research", date: "2026-11-15T15:00:00+00:00", sender_domain: "outdoorresearch.narvar.com", error: "HomeAssistantError" }],
       cards: [
         { id: "p1", status: "new", store: "Old Navy", store_key: "old_navy", order_ref: "ON-1", order_date: "2026-11-22", currency: "USD", name: `High-Waisted Wow Jeans ${XSS}`, brand: "Old Navy", color: "Black", size: "8 Tall", quantity: 1, unit_price: 44.99, product_url: "https://oldnavy.example/p", photos: ["purchase-p1-a.jpg"], photo_urls: [{ name: "purchase-p1-a.jpg", full: PIXEL, thumb: PIXEL }], garment_id: null, created: iso(60), updated: iso(60), status_changed: iso(60) },
@@ -116,11 +116,12 @@ async function setup(browser, viewport, wardrobe) {
   await page.evaluate(async ({ payload }) => {
     window.__calls = [];
     window.__listeners = {};
+    window.__payload = payload;
     const hass = {
       themes: { darkMode: false },
       callWS: async (msg) => {
         window.__calls.push(msg);
-        if (msg.type === "laundry_hub/data") return JSON.parse(JSON.stringify(payload));
+        if (msg.type === "laundry_hub/data") return JSON.parse(JSON.stringify(window.__payload));
         if (msg.type === "laundry_hub/garment/create" && msg.uid === "bad") throw { message: "Invalid tag UID bad" };
         if (msg.type === "laundry_hub/garment/create") return { ...payload.garments[0], id: "g01" };
         return { moved: 1, updated: 1 };
@@ -312,9 +313,17 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   t = await text(page);
   for (const s of ["Stations", "Online", "Offline", "Not set up", "Wardrobe catalog"]) if (!t.includes(s)) fail(`${tag} settings: missing "${s}"`);
   const pe = await sr(page, "return root.querySelector('[data-section=purchase-emails]')?.textContent || ''");
-  for (const s of ["Connected", "Stores", "3", "Last check", "12 min ago", "New cards", "Last problem", "None", "Change in Configure", "1 email couldn't be read · Outdoor Research", "Retry unreadable emails", "Cleaned up: 31 non-clothing removed, 10 duplicates grouped"]) if (!pe.includes(s)) fail(`${tag} settings: purchase row missing "${s}"`);
+  for (const s of ["Connected", "Stores", "3", "Last check", "12 min ago", "New cards", "Last problem", "None", "Change in Configure", "1 email couldn't be read · Outdoor Research", "Retry unreadable emails", "Cleaned up: 31 marked not clothing (restorable), 2 health items removed, 10 duplicates grouped"]) if (!pe.includes(s)) fail(`${tag} settings: purchase row missing "${s}"`);
   await click(page, '[data-act="cleanupSeen"]'); await settle(page);
   if (!(await page.evaluate(() => window.__calls.some((c) => c.type === "laundry_hub/purchases/cleanup_seen")))) fail(`${tag}: cleanup_seen call`);
+  // v0.2.7: the AI was unavailable after the retries: a note and "Reclassify old cards".
+  await page.evaluate(() => { window.__payload.purchases.cleanup = { skipped: true }; window.__push({ changed: true }); });
+  await page.waitForTimeout(700); await settle(page);
+  const note = await sr(page, "return root.querySelector('[data-section=purchase-cleanup]')?.textContent || ''");
+  if (!note.includes("Cleanup skipped: AI unavailable — use Reclassify old cards")) fail(`${tag}: cleanup skipped note ${note}`);
+  await click(page, '[data-act="reclassify"]'); await settle(page);
+  if (!(await page.evaluate(() => window.__calls.some((c) => c.type === "laundry_hub/purchases/reclassify")))) fail(`${tag}: reclassify call`);
+  await page.evaluate(() => { window.__payload.purchases.cleanup = { not_clothing: 31, health: 2, grouped: 10 }; });
   await click(page, '[data-act="retryUnreadable"]'); await settle(page);
   if (!(await page.evaluate(() => window.__calls.some((c) => c.type === "laundry_hub/purchases/retry_unreadable")))) fail(`${tag}: retry unreadable call`);
   await noHScroll(page, `${tag} settings`);

@@ -1,3 +1,41 @@
+# Laundry Hub build report: v0.2.7
+- Version: 0.2.7 / Date: 2026-11-28 / Repo: https://github.com/thermitehash/ha-laundry-hub
+- PR: https://github.com/thermitehash/ha-laundry-hub/pull/10. v0.2.6 was merged in PR #9 (`f5f2288`); it wasn't installed on Heather's HA.
+- CI: workflow **Validate** on PR #10 (see the latest run)
+
+## Summary
+A small patch to the one-time cleanup before it ever runs on Heather's install.
+- **Non-clothing is marked, not deleted:**
+  - such cards are marked "Not clothing" and dismissed with their photos kept, so Restore brings them back;
+  - health and medication items are still deleted;
+  - Settings: "Cleaned up: X marked not clothing (restorable), Y health items removed, Z duplicates grouped".
+- **AI unavailable or failing:**
+  - nothing changes and the cleanup stays pending;
+  - it's retried at each of the next 3 checks, then gives up with the note "Cleanup skipped: AI unavailable — use Reclassify old cards";
+  - the new Settings button (`purchases/reclassify`) runs it again.
+- `CLEANUP_VERSION` is unchanged. A v0.2.6 store marked done with `classified: false` counts as pending.
+- Heather's answers to the v0.2.6 questions are recorded in DECISIONS.md.
+
+## Tests
+- 379 pytest (coverage 95 %).
+- The v0.2.6 cleanup test is updated:
+  - non-clothing is dismissed, not deleted, and its photo is kept;
+  - Restore brings a card back with its photo and lifts the rule;
+  - health items are still deleted.
+- New tests:
+  - an AI failure leaves the cleanup pending and changes nothing; retried at 3 checks, then gives up with the note and no more automatic attempts;
+  - the Reclassify button runs it again (with the AI working, and while it's still down);
+  - a v0.2.6 store with `classified: false` runs again, and a done store doesn't.
+- The panel smoke test covers the new Settings line, the skipped note and the Reclassify button.
+
+## Needs a person
+- Heather's install, after updating to 0.2.7:
+  - the first check runs the cleanup, and Settings shows the counts;
+  - cards marked not clothing appear in Purchases → Archived and can be restored;
+  - if the AI isn't set up, the note and button appear after 3 more checks.
+
+---
+
 # Laundry Hub build report: v0.2.6
 - Version: 0.2.6 / Date: 2026-11-28 / Repo: https://github.com/thermitehash/ha-laundry-hub
 - PR: https://github.com/thermitehash/ha-laundry-hub/pull/9 (not merged). v0.2.5 was merged in PR #8 (`e83bf13`) and released as `v0.2.5`.

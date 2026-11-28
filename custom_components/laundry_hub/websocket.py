@@ -527,6 +527,25 @@ async def ws_purchases_cleanup_seen(
     return {}
 
 
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/purchases/reclassify"}
+)
+@websocket_api.async_response
+@_with_hub(Policy.ADMIN)
+async def ws_purchases_reclassify(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Settings' "Reclassify old cards": run the cleanup again now."""
+    state = await hub.purchases.async_reclassify() or {}
+    return {
+        "classified": bool(state.get("classified")),
+        "cleanup": hub.purchases.status()["cleanup"],
+    }
+
+
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/purchases/check"})
 @websocket_api.async_response
 @_with_hub(Policy.ADMIN)
@@ -1402,6 +1421,7 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_purchases_merge,
         ws_purchases_assign,
         ws_purchases_cleanup_seen,
+        ws_purchases_reclassify,
         ws_purchases_match,
         ws_purchases_dismiss,
         ws_purchases_check,

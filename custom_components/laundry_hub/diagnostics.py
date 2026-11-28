@@ -110,7 +110,16 @@ def _purchases(hub: Any) -> dict[str, Any]:
         # v0.2.6: counts only (no names, owners or order numbers).
         "cleanup": {
             k: (meta.get("cleanup") or {}).get(k)
-            for k in ("version", "removed", "grouped", "split", "classified")
+            for k in (
+                "version",
+                "not_clothing",
+                "health",
+                "grouped",
+                "split",
+                "classified",
+                "attempts",
+                "gave_up",
+            )
         },
         "grouped_cards": sum(
             1 for c in inbox.cards.values() if len(c.get("history") or []) > 1
