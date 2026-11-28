@@ -1,7 +1,7 @@
 # Laundry Hub build report: v0.2.6
 - Version: 0.2.6 / Date: 2026-11-28 / Repo: https://github.com/thermitehash/ha-laundry-hub
 - PR: https://github.com/thermitehash/ha-laundry-hub/pull/9 (not merged). v0.2.5 was merged in PR #8 (`e83bf13`) and released as `v0.2.5`.
-- Commit: `b110f26` (code); this report is committed on top as a docs-only commit
+- Commits: `b110f26` (code), `c947285` (follow-up: client compatibility, "Laundry Hub" sidebar name); the build report is a docs-only commit
 - CI: workflow **Validate** on PR #9 (see the latest run)
 
 ## Summary
