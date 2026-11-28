@@ -71,6 +71,8 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 STATUSES = ("new", "matched", "dismissed", "archived")
+MAX_ATTEMPTS = 3  # failed reads of one email before it's marked unreadable
+_ADDRESS = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
 MAX_SEEN_IDS = 3000
 MAX_MESSAGES_PER_RUN = 200
 MAX_BACKOFF = timedelta(hours=6)
@@ -102,6 +104,11 @@ def _err(key: str, message: str) -> HomeAssistantError:
     from .hub import validation_error  # noqa: PLC0415 - avoid import cycle
 
     return validation_error(key, message)
+
+
+def redact(text: str, limit: int = 300) -> str:
+    """An error message safe for the log: no addresses, short."""
+    return _ADDRESS.sub("<address>", " ".join(str(text).split()))[:limit]
 
 
 def subject_matches(subject: str, keywords: list[str]) -> bool:
@@ -371,7 +378,11 @@ class PurchaseInbox:
                 uids = [u for u in found if u > last_uid]
             uids = sorted(set(uids))[:MAX_MESSAGES_PER_RUN]
             processed = await self._async_process(box, uids, opted, keywords, summary)
-            highest = max([last_uid, *processed])
+            pending = summary.get("pending") or []
+            cap = min(pending) - 1 if pending else None
+            highest = max(
+                [last_uid, *(u for u in processed if cap is None or u <= cap)]
+            )
             if fresh and self.backfill_days <= 0:
                 highest = max(highest, (box.uidnext or 1) - 1)
             if summary["error"] and fresh:
@@ -419,17 +430,22 @@ class PurchaseInbox:
             ):
                 done.append(header.uid)  # generic IMAP: subject filter is ours
                 continue
+            key = header.message_id or f"uid:{box.account.folder_key}:{header.uid}"
             try:
                 order = await self._async_extract(box, header, match[1])
             except HomeAssistantError as err:
-                summary["error"] = "AIFailed"
-                self._record_error("AIFailed")
-                _LOGGER.warning(
-                    "Reading an order email from %s failed (%s); will retry",
-                    header.sender_domain,
-                    type(err).__name__,
-                )
-                break  # retry from this message next time
+                if self._record_failure(key, header, match[1], err, box):
+                    summary["unreadable"] = summary.get("unreadable", 0) + 1
+                    if header.message_id:  # moved past: never read again
+                        seen.append(header.message_id)
+                        seen_set.add(header.message_id)
+                    done.append(header.uid)
+                else:
+                    summary["error"] = "AIFailed"
+                    summary.setdefault("pending", []).append(header.uid)
+                    self._record_error("AIFailed")
+                continue  # one email never blocks the others
+            (self.meta.get("failures") or {}).pop(key, None)
             summary["messages"] += 1
             if order is not None and order.is_order and order.items:
                 new, updated = await self._async_apply(order, match, header)
@@ -441,6 +457,86 @@ class PurchaseInbox:
             done.append(header.uid)
         del seen[:-MAX_SEEN_IDS]
         return done
+
+    def _record_failure(
+        self,
+        key: str,
+        header: Header,
+        store_name: str,
+        err: Exception,
+        box: MailboxSession,
+    ) -> bool:
+        """Count a failed read; True once the email is marked unreadable."""
+        failures: dict[str, Any] = self.meta.setdefault("failures", {})
+        entry = failures.setdefault(key, {"count": 0})
+        entry.update(
+            count=int(entry.get("count", 0)) + 1,
+            message_id=header.message_id,
+            sender_domain=header.sender_domain,
+            store=store_name,
+            date=header.date.isoformat() if header.date else None,
+            error=type(err.__cause__ or err).__name__,
+            uid=header.uid,
+            folder=box.account.folder_key,
+        )
+        detail = redact(str(err.__cause__ or err) or type(err).__name__)
+        if entry["count"] < MAX_ATTEMPTS:
+            _LOGGER.warning(
+                "Reading an order email from %s failed (attempt %s of %s): %s; "
+                "will retry",
+                header.sender_domain,
+                entry["count"],
+                MAX_ATTEMPTS,
+                detail,
+            )
+            self.hub.catalog.schedule_save()
+            return False
+        del failures[key]
+        self.meta.setdefault("unreadable", {})[key] = entry
+        _LOGGER.warning(
+            "An order email from %s couldn't be read after %s attempts (%s); "
+            "skipping it. Retry from Laundry Hub's settings",
+            header.sender_domain,
+            MAX_ATTEMPTS,
+            detail,
+        )
+        self.hub.catalog.schedule_save()
+        return True
+
+    def unreadable(self) -> list[dict[str, Any]]:
+        """Emails that couldn't be read, newest first (no message ids)."""
+        out = [
+            {
+                "store": e.get("store"),
+                "date": e.get("date"),
+                "sender_domain": e.get("sender_domain"),
+                "error": e.get("error"),
+            }
+            for e in (self.meta.get("unreadable") or {}).values()
+        ]
+        return sorted(out, key=lambda e: str(e.get("date") or ""), reverse=True)
+
+    async def async_retry_unreadable(self) -> dict[str, Any]:
+        """Clear the unreadable marks and read those emails again now."""
+        self.hub.wardrobe.require()
+        marked: dict[str, Any] = self.meta.pop("unreadable", {}) or {}
+        seen: list[str] = self.meta.setdefault("seen_ids", [])
+        folders: dict[str, Any] = self.meta.setdefault("folders", {})
+        for entry in marked.values():
+            if entry.get("message_id") in seen:
+                seen.remove(entry["message_id"])
+            state = folders.get(str(entry.get("folder")))
+            if not isinstance(state, dict):
+                continue
+            uid = int(entry.get("uid") or 0)
+            state["last_uid"] = min(int(state.get("last_uid") or 0), max(uid - 1, 0))
+            when = dt_util.parse_datetime(str(entry.get("date") or ""))
+            checked = dt_util.parse_datetime(str(state.get("checked") or ""))
+            if when is not None and (checked is None or when < checked):
+                state["checked"] = (when - timedelta(days=1)).isoformat()
+        self.hub.catalog.schedule_save()
+        summary = await self.async_check(manual=True)
+        return {**summary, "retried": len(marked)}
 
     async def _async_extract(
         self, box: MailboxSession, header: Header, store_name: str
@@ -462,12 +558,10 @@ class PurchaseInbox:
                 text=text,
                 clothing_only=self.clothing_only,
             )
-        except (TypeError, ValueError) as err:
-            raise HomeAssistantError("AI answer didn't fit") from err
         except HomeAssistantError:
             raise
         except Exception as err:
-            raise HomeAssistantError(type(err).__name__) from err
+            raise HomeAssistantError(f"{type(err).__name__}: {err}") from err
 
     # --- cards -----------------------------------------------------------
 
@@ -832,6 +926,7 @@ class PurchaseInbox:
             "last_check": self.meta.get("last_check"),
             "last_error": self.meta.get("last_error"),
             "new_cards": len(self.unmatched()),
+            "unreadable": self.unreadable(),
         }
 
     def view(self, card: dict[str, Any]) -> dict[str, Any]:

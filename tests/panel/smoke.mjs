@@ -73,6 +73,7 @@ function data(wardrobe) {
     persons: [{ entity_id: "person.heather", name: "Heather" }, { entity_id: "person.sam", name: "Sam" }],
     purchases: wardrobe ? {
       connected: true, provider: "gmail", stores: 3, last_check: iso(12), last_error: null, new_cards: 2,
+      unreadable: [{ store: "Outdoor Research", date: "2026-11-15T15:00:00+00:00", sender_domain: "outdoorresearch.narvar.com", error: "HomeAssistantError" }],
       cards: [
         { id: "p1", status: "new", store: "Old Navy", store_key: "old_navy", order_ref: "ON-1", order_date: "2026-11-22", currency: "USD", name: `High-Waisted Wow Jeans ${XSS}`, brand: "Old Navy", color: "Black", size: "8 Tall", quantity: 1, unit_price: 44.99, product_url: "https://oldnavy.example/p", photos: ["purchase-p1-a.jpg"], photo_urls: [{ name: "purchase-p1-a.jpg", full: PIXEL, thumb: PIXEL }], garment_id: null, created: iso(60), updated: iso(60), status_changed: iso(60) },
         { id: "p3", status: "new", store: "Blauer", store_key: "blauer", uniform_supplier: true, order_ref: "B-1", order_date: "2026-11-21", currency: "USD", name: "8703 Long Sleeve Shirt", brand: "Blauer", color: "French Blue", size: "L", quantity: 1, unit_price: 64, product_url: null, photos: [], photo_urls: [], garment_id: null, created: iso(100), updated: iso(100), status_changed: iso(100) },
@@ -268,7 +269,9 @@ for (const [vw, vh, tag] of [[390, 844, "phone"], [1280, 800, "wide"]]) {
   t = await text(page);
   for (const s of ["Stations", "Online", "Offline", "Not set up", "Wardrobe catalog"]) if (!t.includes(s)) fail(`${tag} settings: missing "${s}"`);
   const pe = await sr(page, "return root.querySelector('[data-section=purchase-emails]')?.textContent || ''");
-  for (const s of ["Connected", "Stores", "3", "Last check", "12 min ago", "New cards", "Last problem", "None", "Change in Configure"]) if (!pe.includes(s)) fail(`${tag} settings: purchase row missing "${s}"`);
+  for (const s of ["Connected", "Stores", "3", "Last check", "12 min ago", "New cards", "Last problem", "None", "Change in Configure", "1 email couldn't be read · Outdoor Research", "Retry unreadable emails"]) if (!pe.includes(s)) fail(`${tag} settings: purchase row missing "${s}"`);
+  await click(page, '[data-act="retryUnreadable"]'); await settle(page);
+  if (!(await page.evaluate(() => window.__calls.some((c) => c.type === "laundry_hub/purchases/retry_unreadable")))) fail(`${tag}: retry unreadable call`);
   await noHScroll(page, `${tag} settings`);
   await shot(page, `${tag}-settings`);
 

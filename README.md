@@ -5,7 +5,7 @@ tracking and laundry sorting lights. Tap a tagged garment on a station and Laund
 works out where it goes next. The matching wash bin or dry zone lights up on a WLED strip,
 and the station's LED confirms the tap.
 
-> **Status: v0.2.3, unverified on hardware.** Everything is built and tested against fakes
+> **Status: v0.2.4, unverified on hardware.** Everything is built and tested against fakes
 > (see [`docs/build-report.md`](docs/build-report.md)). Stations, readers, tags and WLED
 > have not been tested on real hardware yet.
 
@@ -190,8 +190,11 @@ websocket. The contract is in [`docs/app-api.md`](docs/app-api.md).
 
 - **Admins only** (default): only HA administrators can use Laundry Hub, exactly as before.
 - **Household:** other HA users (members) can use the app too. Each member sees, phone-taps and
-  edits only their own owner's garments (name, notes, photos, size, description and wear for).
-  Deleting, zones, bulk changes, purchase emails and other people's garments stay admin-only.
+  edits only their own owner's garments (name, notes, photos, size and wear for). They can also
+  add a garment for themselves: tap the new tag with their phone, then name it and pick a wash
+  bin and dry type (within 30 minutes of the tap). Their first photo is described automatically
+  if an AI Task entity is set. Deleting, zones, bulk changes, editing descriptions, purchase
+  emails and other people's garments stay admin-only.
   After choosing Household, pick which person each HA user is. Users linked to a person in
   Settings → People are filled in for you.
 - A phone can act as a tap station. Its taps go through the same rules, flash the zone light,
@@ -277,6 +280,9 @@ Changes made under v0.2 are not in the backup.
   tap from a device other than the configured one is logged and dropped.
 - **Purchase emails: "Google rejected the password"**: use an app password, not your normal
   password, and check that 2-Step Verification is on.
+- **Purchase emails: "1 email couldn't be read"**: one order email failed three times and was
+  set aside so the rest keep importing. Use **Retry unreadable emails** (Settings in the panel,
+  or Configure); the HA log line "An order email from … couldn't be read" says why.
 - **Purchase emails: no cards**: check that the store is ticked in *Edit stores* and that
   its emails come from a domain in the list (add it under *Custom sender domains* if not).
   *Check now* shows the counts.

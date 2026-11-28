@@ -14,7 +14,17 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 import probatio as vol
 
-from .access import Caller, Forbidden, Policy, caller_for, can_see_garment, check
+from .access import (
+    ACCESS_HOUSEHOLD,
+    Caller,
+    Forbidden,
+    Policy,
+    app_access,
+    caller_for,
+    can_see_garment,
+    check,
+    member_unknown_tags,
+)
 from .const import (
     API_VERSION,
     CLOSET_STATIONS,
@@ -202,6 +212,11 @@ def _sign_garment(garment: dict[str, Any], sign: Callable[[str], str]) -> None:
     ]
 
 
+def _member_tag(tag: dict[str, Any]) -> dict[str, Any]:
+    """An unknown tag as a member sees it (no other users' ids)."""
+    return {k: v for k, v in tag.items() if k != "tapped_by"}
+
+
 def filter_for(caller: Caller, hub: LaundryHub, data: dict[str, Any]) -> dict[str, Any]:
     """A member sees only their own owner's garments (and matched cards)."""
     data["role"] = caller.role
@@ -209,7 +224,10 @@ def filter_for(caller: Caller, hub: LaundryHub, data: dict[str, Any]) -> dict[st
         return data
     own = {g["id"] for g in data["garments"] if g.get("owner") == caller.owner}
     data["garments"] = [g for g in data["garments"] if g["id"] in own]
-    data["unknown_tags"] = []
+    data["unknown_tags"] = [
+        hub.revs.stamp("unknown_tag", str(t["uid"]), _member_tag(t))
+        for t in member_unknown_tags(hub, caller)
+    ]
     data["last_unknown"] = None
     data["owners"] = {
         k: v for k, v in (data.get("owners") or {}).items() if k == caller.owner
@@ -359,6 +377,22 @@ async def ws_purchases_uniform(
     return {"updated": count}
 
 
+@websocket_api.websocket_command(
+    {vol.Required("type"): f"{DOMAIN}/purchases/retry_unreadable"}
+)
+@websocket_api.async_response
+@_with_hub(Policy.ADMIN)
+async def ws_purchases_retry(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: _Msg,
+    hub: LaundryHub,
+) -> Any:
+    """Clear the 'couldn't be read' marks and read those emails again."""
+    hub.wardrobe.require()
+    return await hub.purchases.async_retry_unreadable()
+
+
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/purchases/check"})
 @websocket_api.async_response
 @_with_hub(Policy.ADMIN)
@@ -454,20 +488,21 @@ def ws_subscribe(
     }
 )
 @websocket_api.async_response
-@_with_hub(Policy.ADMIN)
+@_with_hub(Policy.ENROL)
 async def ws_create(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
     msg: _Msg,
     hub: LaundryHub,
 ) -> Any:
-    """Create a garment."""
+    """Create a garment (a member: for their own owner, from their own tap)."""
+    caller = caller_of(msg)
     garment = hub.enroll(
         uid=msg["uid"],
         name=msg["name"],
         wash_bin=msg["wash_bin"],
         dry_type=msg["dry_type"],
-        owner=msg.get("owner"),
+        owner=msg.get("owner") if caller.is_admin else caller.owner,
         notes=msg.get("notes"),
         location=msg.get("location") or None,
     )
@@ -740,7 +775,7 @@ async def ws_wardrobe(
     }
 )
 @websocket_api.async_response
-@_with_hub(Policy.OWN_GARMENT)
+@_with_hub(Policy.ADMIN)
 async def ws_describe_fields(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
@@ -765,7 +800,7 @@ async def ws_describe_fields(
     }
 )
 @websocket_api.async_response
-@_with_hub(Policy.OWN_GARMENT)
+@_with_hub(Policy.ADMIN)
 async def ws_reset_field(
     hass: HomeAssistant,
     connection: websocket_api.ActiveConnection,
@@ -987,6 +1022,8 @@ async def ws_api_info(
 def capabilities(hub: LaundryHub) -> list[str]:
     """Features the app may show (more arrive in later versions)."""
     caps = ["phone_tap", "changes", "if_rev"]
+    if app_access(hub) == ACCESS_HOUSEHOLD:
+        caps.append("member_enroll")
     if hub.wardrobe.enabled:
         caps.append("url_import")
         if hub.wardrobe.ai_entity:
@@ -1040,6 +1077,13 @@ async def ws_changes(
             revs.stamp("unknown_tag", uid, dict(hub.catalog.unknown_tags[uid]))
             for uid in ids["unknown_tag"]
             if uid in hub.catalog.unknown_tags
+        ]
+    else:
+        mine = {str(t["uid"]) for t in member_unknown_tags(hub, caller)}
+        unknown = [
+            revs.stamp("unknown_tag", uid, _member_tag(hub.catalog.unknown_tags[uid]))
+            for uid in ids["unknown_tag"]
+            if uid in mine
         ]
     for cid in ids["purchase"]:
         card = hub.catalog.purchases.get(cid)
@@ -1168,6 +1212,7 @@ def async_setup_websocket(hass: HomeAssistant) -> None:
         ws_purchases_match,
         ws_purchases_dismiss,
         ws_purchases_check,
+        ws_purchases_retry,
         ws_purchases_restore,
         ws_purchases_uniform,
         ws_api_info,

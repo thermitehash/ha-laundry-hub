@@ -3,6 +3,13 @@
 
 const CONFIG_PATH = "/config/integrations/integration/laundry_hub";
 
+// "1 email couldn't be read · Outdoor Research · Nov 20"
+function unreadableText(lib, items) {
+  const first = items[0];
+  const more = items.length > 1 ? ` (+${items.length - 1} more)` : "";
+  return `${items.length} email${items.length === 1 ? "" : "s"} couldn't be read · ${first.store || first.sender_domain} · ${lib.shortDate(first.date)}${more}`;
+}
+
 // Read-only status of the purchase-email connection; changes happen in Configure.
 function purchaseRow(ctx) {
   const { lib, data } = ctx;
@@ -12,7 +19,9 @@ function purchaseRow(ctx) {
        <div class="kv"><span>Stores</span><span>${p.stores}</span></div>
        <div class="kv"><span>Last check</span><span>${lib.esc(lib.timeAgo(p.last_check))}</span></div>
        <div class="kv"><span>New cards</span><span>${p.new_cards}</span></div>
-       <div class="kv"><span>Last problem</span><span class="${p.last_error ? "state problem" : ""}">${lib.esc(p.last_error || "None")}</span></div>`
+       <div class="kv"><span>Last problem</span><span class="${p.last_error ? "state problem" : ""}">${lib.esc(p.last_error || "None")}</span></div>
+       ${(p.unreadable || []).length ? `<div class="kv"><span>Couldn't read</span><span class="state problem">${lib.esc(unreadableText(lib, p.unreadable))}</span></div>
+       <button type="button" class="btn" data-act="retryUnreadable" ${ctx.state.busy?.retry ? "disabled" : ""}>${ctx.state.busy?.retry ? "Reading again…" : "Retry unreadable emails"}</button>` : ""}`
     : `<div class="kv"><span>Status</span><span class="state unknown">Not connected</span></div>`;
   return `<h2 class="section-label">Purchase emails</h2><div class="card stack" data-section="purchase-emails">${rows}
     <a class="link" href="${CONFIG_PATH}" data-act="openConfig">${p.connected ? "Change in Configure" : "Connect in Configure"}</a></div>`;
@@ -58,6 +67,14 @@ export function render(ctx) {
 }
 
 export const actions = {
+  async retryUnreadable(ctx) {
+    ctx.state.busy = { ...(ctx.state.busy || {}), retry: true };
+    ctx.render();
+    const res = await ctx.ws("purchases/retry_unreadable", {});
+    ctx.state.busy = { ...(ctx.state.busy || {}), retry: false };
+    if (res) ctx.toast(`Read ${res.retried} email(s) again: ${res.new_cards || 0} new card(s)`);
+    ctx.reload();
+  },
   openConfig: (ctx) => ctx.navigate(CONFIG_PATH),
   async saveOwner(ctx, form) {
     const label = new FormData(form).get("work_label").toString().trim();

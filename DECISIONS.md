@@ -1,3 +1,30 @@
+# Decisions (v0.2.4)
+
+Choices made while building v0.2.4 without asking. Each line: decision, then reason.
+
+1. **Heather's answers to the v0.2.3 questions:**
+   - (a) Members get AI descriptions only through the automatic describe after the first photo on their own garment. It runs server-side with the integration's AI Task entity. Manual describe and re-describe, `describe_fields` and `reset_field` are admin-only.
+   - (b) Members still don't see unmatched purchase cards.
+   - (c) Members may enrol garments for themselves.
+   - (d) Phone taps still can't move a garment to another bin.
+2. **Placeholder fix: with Wardrobe off, the options flow opens the `settings` step (no placeholders) instead of `init`.** `init` is now the Wardrobe-on menu only, so its "Purchase emails: {status}" always has its value. The two steps share the same handler and fields.
+3. **The placeholder test records every form, menu and abort our flows render** (by wrapping HA's `async_show_form`, `async_show_menu` and `async_abort`) and checks them against `strings.json`. A coverage check fails if any step, or any placeholder-bearing abort, in `strings.json` is never rendered, so a new step can't skip the check. Repair issues are checked too.
+4. **Member enrolment needs a recent phone tap of that tag by that member.** The unknown tag records `tapped_by` (the HA user id), and "recent" means within 30 minutes. A station tap clears `tapped_by`. That is how "a member sees only the unknown tag they just tapped" and "uids other than the tapped one stay admin-only" are enforced.
+5. **A member sees at most one unknown tag: their latest phone tap within the window.** "Just tapped" means one tag. Older taps go back to the admins' list.
+6. **The member's owner is forced on create**: no owner, or their own owner, is accepted; any other value gets `owner_not_allowed`, and a member without a mapping gets `no_owner_mapping`. A tag that isn't theirs gets `tag_not_yours`. Admin-only fields (`location`, plus brand, purchase and uniform, which `garment/create` never takes) get `unauthorized`.
+7. **`tapped_by` never leaves the server for members** (removed from their view) **and is removed from diagnostics.** It's another HA user's id.
+8. **The phone tap's unknown answer adds `can_enroll` and `owner` (additive).** The app knows straight away whether to offer "Add it" and for whom.
+9. **`member_enroll` is listed whenever App access is Household**, as the prompt says, even for an admin caller. It describes the server, not the caller.
+10. **Two v0.2.3 test assertions changed, as direct results of this release:** the member-allowed command set (create added; describe_fields and reset_field removed), and the exact unknown-tap answer (new fields). A third replaced a hard-coded "0.2.3" with `VERSION`. Everything else in the suite runs unchanged.
+11. **Purchase import (Heather's install, stuck on one Narvar email): failures are tracked per Message-ID.** Each failure counts; on the 3rd the email is marked unreadable (Message-ID, sender domain, store, date, error class, UID) and its Message-ID is added to the seen list. Without a Message-ID, a `uid:<folder>:<uid>` key is used.
+12. **A failing email no longer stops the run (`continue`, not `break`).** The run's `last_uid` stops just below the earliest email still being retried, and emails after it are imported and marked seen. The next run re-reads only the failing one; the others are skipped by Message-ID, which costs one header fetch. Unreadable emails count as handled, so the window moves past them.
+13. **"Retry unreadable emails" clears the marks, removes those Message-IDs from the seen list and rewinds the folder's UID and date window to the oldest one**, then checks right away. It's available from Configure (menu, shown only when there are any), from Settings in the panel, and as `purchases/retry_unreadable` (admin).
+14. **The extraction structure is now loose:** every field is optional plain text (prices and quantities too), items may be empty, and nothing is required. Prices like "$12.99" or "USD 1,234.50" and quantities like "2 pcs" are parsed locally, and a missing quantity is 1. A missing `is_order` counts as an order; an item without a name is skipped.
+15. **If `generate_data` raises, it's retried once with a minimal structure** (is_order, store, order_ref, items[name, image_url]). Only if that fails too does the failure count.
+16. **Failure logs include the exception message**, with email addresses replaced by `<address>` and cut to 300 characters. The email body is never logged. The Anthropic provider's own "Failed to parse JSON response" log, which includes the reply, is outside Laundry Hub.
+17. **A shipping notice with no items for an unseen order isn't an error:** it's read, makes no card and is marked seen. Recording it against the order when the confirmation arrives isn't built; the confirmation creates the cards anyway.
+18. **Heather's answers to the v0.2.4 open questions (no code change):** the 30-minute enrolment window stays fixed, not configurable. Members enrol one tag at a time, the latest they tapped, with no batch of several tags tapped in a row. Admins aren't notified when a member enrols a garment.
+
 # Decisions (v0.2.3)
 
 Choices made while building v0.2.3 without asking. Each line: decision, then reason.

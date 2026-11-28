@@ -10,14 +10,16 @@ source of truth; the sidebar panel uses the same commands.
   fields, commands or capabilities never bumps it, so clients must ignore unknown fields.
 - Errors use HA's websocket error format: `{"success": false, "error": {"code", "message"}}`.
   Codes the app should handle: `unauthorized`, `conflict` (with extra fields, see below),
-  `not_loaded`, `unknown_garment`, `invalid_format`, and the validation codes listed per command.
+  `not_loaded`, `unknown_garment`, `invalid_format`, `no_owner_mapping`, `owner_not_allowed`,
+  `tag_not_yours`, `tag_not_enrolled` and `invalid_action`, plus the validation codes listed
+  per command.
 
 ## Roles and access
 
 | Who | When | Can |
 |---|---|---|
 | **admin** (HA administrator) | always | everything (what the panel does) |
-| **member** (any other HA user) | only when Configure → **App access** is *Household* | read their own owner's garments (and all zones), phone-tap, and edit their own garments' name, notes, photos, size, description fields and wear_for |
+| **member** (any other HA user) | only when Configure → **App access** is *Household* | read their own owner's garments (and all zones), phone-tap, **enrol a garment for themselves from a tag they just tapped** (0.2.4), and edit their own garments' name, notes, photos, size and wear_for |
 
 With App access set to *Admins only* (the default), a member gets `unauthorized` for every
 command, and 401/404 from the photo endpoints.
@@ -26,10 +28,40 @@ A member's **owner** is a `person` entity: the one chosen for their HA user unde
 people. Otherwise it's the person linked to their HA user in Settings → People. A member without
 an owner sees no garments.
 
-Admin only, even with *Household*: deleting garments, creating garments, zones, bulk reassign
-and set-field, location changes outside phone taps, unknown-tag dismissal, URL import, AI
-describe, purchase emails and purchase cards that aren't matched to the member's garments,
-and other owners' garments.
+Admin only, even with *Household*:
+
+- deleting garments, zones, bulk reassign and set-field, location changes outside phone taps;
+- unknown-tag dismissal and the unknown-tag list;
+- URL import;
+- manual AI describe and re-describe, `garment/describe_fields` and `garment/reset_field`
+  (admin-only from 0.2.4);
+- brand, purchase details and uniform;
+- purchase emails, and purchase cards that aren't matched to the member's garments;
+- other owners' garments.
+
+**AI descriptions for members (0.2.4):** when a member adds the first photo to their own
+garment, the automatic description runs, exactly as when an admin adds it in the panel. It runs
+server-side, with the AI Task entity chosen in Laundry Hub's settings, not as the member.
+
+**Member enrolment (0.2.4, capability `member_enroll`):**
+
+1. The member taps the new tag with their phone (`tap`, no action). The answer has
+   `"known": false, "can_enroll": true, "owner": "<their person>"`.
+2. The member calls `garment/create` with `uid` (that tag), `name`, `wash_bin`, `dry_type` and
+   optionally `notes`. `owner` may be left out or set to their own owner; it is forced to it.
+3. Photos, size and wear_for follow with the usual commands (`photo/upload`, `garment/wardrobe`).
+
+Rules:
+
+- A member may enrol only the unknown tag they tapped last, with their own phone, within
+  30 minutes. A station tap of that tag hands it back to the admins.
+- A member sees only that one unknown tag in `data` and `changes`, never the household list.
+- Enrolling removes the tag from the unknown list, as for admins.
+- `location`, `brand`, purchase, uniform and lifecycle are admin-only (`unauthorized`).
+- Errors:
+  - `no_owner_mapping`: the member's HA user isn't linked to a person.
+  - `owner_not_allowed`: another owner was given.
+  - `tag_not_yours`: not the member's recent phone tap.
 
 ## Commands
 
@@ -45,13 +77,14 @@ All types are prefixed with `laundry_hub/`. "Policy" is the access rule from the
 What the server supports and who you are.
 
 ```json
-{"api_version": 1, "integration_version": "0.2.3", "wardrobe_enabled": true,
- "capabilities": ["phone_tap", "changes", "if_rev", "url_import", "ai_describe", "purchases"],
+{"api_version": 1, "integration_version": "0.2.4", "wardrobe_enabled": true,
+ "capabilities": ["phone_tap", "changes", "if_rev", "member_enroll", "url_import", "ai_describe", "purchases"],
  "role": "member", "owner": "person.alex", "app_access": "household", "rev": 412}
 ```
 
 `capabilities` lists only what this server has *now*:
 
+- `member_enroll` is listed when App access is *Household* (members may enrol their own tags).
 - `purchases` needs a connected mailbox.
 - `ai_describe` needs an AI Task entity.
 - `url_import` and `ai_describe` need Wardrobe on.
@@ -65,7 +98,8 @@ record `rev` and `updated_at`.
 For a member:
 
 - `garments` holds only their owner's garments.
-- `unknown_tags` is `[]` and `last_unknown` is `null`.
+- `unknown_tags` holds at most the one tag they just tapped with their phone (to enrol it), and
+  `last_unknown` is `null`.
 - `owners` holds only theirs.
 - `purchases` is `{connected, cards: [], archived: [], uniform_offers: [], mine: [...]}`, where
   `mine` holds the cards matched to their garments.
@@ -100,7 +134,7 @@ Offline sync. Returns every record with `rev > since_rev`, plus deletions:
   server's `rev` (for example after an HA restore), the answer is `{"reset": true, "rev": n}`.
   Re-read `data` then.
 - For a member, garments and cards that aren't (or are no longer) theirs come back in `deleted`,
-  so the app drops them. Unknown tags never appear for members.
+  so the app drops them. The only unknown tag a member gets is the one they just tapped.
 - Revs come from one store-wide counter. Store `rev` from each answer and use it as the next
   `since_rev`.
 
@@ -132,7 +166,8 @@ A phone acting as a tap station. `uid` is the tag's hex UID; separators are igno
 - **Without `action`:**
   - An unknown tag is recorded like a station tap. It shows up as an unknown tag, the panel's
     Add page fills in, and the enrolment notification is sent. Answer:
-    `{"known": false, "uid": "99AABBCC", "rev": n}`.
+    `{"known": false, "uid": "99AABBCC", "can_enroll": true, "owner": "person.alex", "rev": n}`.
+    For an admin, `owner` is `null`. For a member without an owner, `can_enroll` is `false`.
   - A known tag answers
     `{"known": true, "uid", "garment": {…}, "available_actions": [...], "rev"}`, where
     `available_actions` is:
@@ -164,22 +199,28 @@ The signature is the auth, so the URL works in an image view without headers.
 
 Errors: `unknown_photo`, and `unauthorized` for someone else's garment.
 
+### Purchase import status (admins)
+
+`data.purchases` includes `unreadable`: emails that couldn't be read after 3 attempts, as
+`[{store, date, sender_domain, error}]`, newest first. They are skipped so the rest of the import
+continues. `purchases/retry_unreadable` (admin) clears the marks, reads them again and answers
+with the check summary plus `retried`.
+
 ### Existing commands
 
 Unchanged from v0.2.2; they gain only `if_rev` / `if_revs` and the policies.
 
+- **enrol** (0.2.4): `garment/create` (admins: any; members: their own recent tap, their own owner)
 - **own**:
   - `garment/update` (members: `name`, `notes` only)
   - `garment/wardrobe` (members: `size`, `wear_for` only)
-  - `garment/describe_fields`
-  - `garment/reset_field`
   - `photo/upload`, `photo/delete`, `photo/remove`, `photo/reorder`
 - **admin**: everything else:
-  - `garment/create`, `garment/delete`, `garment/set_location`, `garment/describe`,
-    `garment/set_field`
+  - `garment/delete`, `garment/set_location`, `garment/describe`, `garment/set_field`
+  - `garment/describe_fields`, `garment/reset_field` (admin-only from 0.2.4)
   - `reassign`, `zone/remove`, `zone/flash`, `unknown/dismiss`
   - `import_product_url`, `import/apply`, `owner/update`
-  - `purchases/*`
+  - `purchases/*` (including `purchases/retry_unreadable`, 0.2.4)
 
 ## HTTP
 

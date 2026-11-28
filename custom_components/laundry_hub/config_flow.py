@@ -369,6 +369,17 @@ async def async_validate_account(data: dict[str, Any]) -> str | None:
     return None
 
 
+def unreadable_text(items: list[dict[str, Any]]) -> str:
+    """'1 email couldn't be read (Outdoor Research, Nov 20)'."""
+    first = items[0]
+    when = dt_util.parse_datetime(str(first.get("date") or ""))
+    day = f"{when:%b} {when.day}" if when else "unknown date"
+    count = len(items)
+    noun = "email" if count == 1 else "emails"
+    more = f" and {count - 1} more" if count > 1 else ""
+    return f"{count} {noun} couldn't be read ({first.get('store')}, {day}{more})"
+
+
 class LaundryHubOptionsFlow(OptionsFlow):
     """Edit the main settings and the purchase-email connection."""
 
@@ -392,7 +403,9 @@ class LaundryHubOptionsFlow(OptionsFlow):
     ) -> ConfigFlowResult:
         """Settings form; with Wardrobe on, a menu that adds Purchase emails."""
         if not self._current.get(CONF_WARDROBE_ENABLED):
-            return await self._settings_form("init", user_input)
+            # Plain settings form: its own step, so the menu's {status}
+            # description (purchase emails) never shows without its value.
+            return await self._settings_form("settings", user_input)
         if self.config_entry.data.get(CONF_PURCHASE_EMAIL):
             options = [
                 "settings",
@@ -402,6 +415,9 @@ class LaundryHubOptionsFlow(OptionsFlow):
                 "email_check",
                 "email_disconnect",
             ]
+            hub = self._hub
+            if hub is not None and hub.purchases.unreadable():
+                options.insert(5, "email_retry")
         else:
             options = ["settings", "email_account"]
         return self.async_show_menu(
@@ -435,6 +451,8 @@ class LaundryHubOptionsFlow(OptionsFlow):
             if status["last_error"]:
                 parts.append(f"last error: {status['last_error']}")
             parts.append(f"{status['new_cards']} new cards")
+            if status["unreadable"]:
+                parts.append(unreadable_text(status["unreadable"]))
         return " · ".join(parts)
 
     async def async_step_settings(
@@ -786,6 +804,28 @@ class LaundryHubOptionsFlow(OptionsFlow):
             description_placeholders={
                 "new": str(summary.get("new_cards", 0)),
                 "updated": str(summary.get("updated_cards", 0)),
+            },
+        )
+
+    async def async_step_email_retry(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Read the emails that couldn't be read again."""
+        hub = self._hub
+        if hub is None:
+            return self.async_abort(reason="not_loaded")
+        try:
+            summary = await hub.purchases.async_retry_unreadable()
+        except HomeAssistantError as err:
+            return self.async_abort(
+                reason="check_failed", description_placeholders={"error": str(err)}
+            )
+        return self.async_abort(
+            reason="retry_done",
+            description_placeholders={
+                "retried": str(summary.get("retried", 0)),
+                "new": str(summary.get("new_cards", 0)),
+                "still": str(len(hub.purchases.unreadable())),
             },
         )
 

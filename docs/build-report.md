@@ -1,3 +1,39 @@
+# Laundry Hub build report: v0.2.4
+- Version: 0.2.4 / Date: 2026-11-28 / Repo: https://github.com/thermitehash/ha-laundry-hub
+- PR: https://github.com/thermitehash/ha-laundry-hub/pull/7 (not merged). v0.2.3 was merged in PR #6 (`690a80f`) and released as `v0.2.3`.
+- Commits: `4d4c2cc` (placeholder fix, member enrolment), `c6a0707` (purchase-import fix); this report is committed on top as a docs-only commit
+- CI: workflow **Validate**, run 46111485671 on `4d4c2cc`: all 16 ✅. The purchase-import fix (`c6a0707`) and this report are verified by the latest Validate run on PR #7.
+
+## Summary
+- **Purchase-import fix (Heather's install):** one email that can't be read no longer blocks the backfill.
+  - Failures are counted per Message-ID; after 3 attempts the email is marked unreadable and skipped, and the window advances past it.
+  - The other emails keep importing in the same run.
+  - Settings and Configure show "1 email couldn't be read" with Retry (`purchases/retry_unreadable`).
+  - Extraction is tolerant: a loose structure, local price/quantity parsing, a minimal-structure retry, and redacted error text in the log.
+  - Shipping notices without items are skipped quietly.
+- **Placeholder fix:** with Wardrobe off, the options flow shows the plain `settings` step, so `init` and its `{status}` description only appear as the Wardrobe-on menu. A programmatic placeholder scan checks every rendered step.
+- **Member enrolment:** from the tag the member just tapped with their phone; owner forced; new errors and the `member_enroll` capability.
+- **Member AI:** describe only through the automatic first-photo describe.
+
+## Tests
+- 340 pytest (coverage 96 %).
+- New `tests/test_v024.py` (16): the placeholder scan across 8 states plus step coverage, repair-issue placeholders, the enrolment matrix, the just-tapped tag, and member auto-describe.
+- New `tests/test_unreadable.py` (5):
+  - a Narvar shipping email with no items is skipped and doesn't block;
+  - an always-failing email is retried twice, marked unreadable on the 3rd run, and the emails after it become cards in the same run;
+  - Retry unreadable (via the inbox and the websocket) reprocesses it; diagnostics show count and domains only;
+  - the minimal-structure retry rescues an email;
+  - price strings, missing quantity and nulls still make a card.
+- The panel smoke test covers the Settings "couldn't be read" row and Retry.
+- Two v0.2.3 assertions updated as direct results of this release.
+
+## Needs a person
+- Heather's install, purchase import: after updating, the next check should get past the Outdoor Research email. Either it's read now (tolerant extraction), or after 3 tries it shows as "1 email couldn't be read" while the backfill continues. The log line then gives the error text.
+- Heather's install: open Configure with Wardrobe off and confirm the log no longer shows "Failed to format translation … status".
+- A non-admin household user: tap a new tag with the phone, enrol it, and add a first photo (it gets described).
+
+---
+
 # Laundry Hub build report: v0.2.3
 - Version: 0.2.3 / Date: 2026-11-28 / Repo: https://github.com/thermitehash/ha-laundry-hub
 - PR: https://github.com/thermitehash/ha-laundry-hub/pull/6 (not merged). v0.2.2 was merged in PR #5 (`543d302`) and released as `v0.2.2`.

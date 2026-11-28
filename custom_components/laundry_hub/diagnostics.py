@@ -61,7 +61,10 @@ async def async_get_config_entry_diagnostics(
         "garment_count": len(garments),
         "garments": garments,
         "unknown_tags": [
-            {**t, "uid": _mask_uid(str(t.get("uid", "")))}
+            {
+                **{k: v for k, v in t.items() if k != "tapped_by"},
+                "uid": _mask_uid(str(t.get("uid", ""))),
+            }
             for t in hub.catalog.unknown_tags.values()
         ],
         "quarantined_records": len(hub.catalog.quarantine),
@@ -96,6 +99,14 @@ def _purchases(hub: Any) -> dict[str, Any]:
         "not_clothing_rules": sum(
             len(v) for v in (meta.get("not_clothing") or {}).values()
         ),
+        "unreadable_emails": len(meta.get("unreadable") or {}),
+        "unreadable_senders": sorted(
+            {
+                str(e.get("sender_domain"))
+                for e in (meta.get("unreadable") or {}).values()
+            }
+        ),
+        "pending_failures": len(meta.get("failures") or {}),
         "last_check": meta.get("last_check"),
         "last_error": meta.get("last_error"),
     }

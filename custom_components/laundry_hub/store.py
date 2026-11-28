@@ -450,8 +450,14 @@ class Catalog:
         self.schedule_save()
         return garment
 
-    def record_unknown(self, uid: str, station: str, now: datetime) -> None:
-        """Remember an unknown tag tap."""
+    def record_unknown(
+        self, uid: str, station: str, now: datetime, tapped_by: str | None = None
+    ) -> None:
+        """Remember an unknown tag tap.
+
+        ``tapped_by`` is the HA user id of a phone tap (v0.2.4: lets a member
+        enrol the tag they just tapped); a station tap clears it.
+        """
         iso = now.isoformat()
         entry = self.unknown_tags.get(uid)
         if entry is None:
@@ -459,6 +465,7 @@ class Catalog:
             self.unknown_tags[uid] = entry
         entry["last_seen"] = iso
         entry["station"] = station
+        entry["tapped_by"] = tapped_by
         entry["count"] = int(entry.get("count", 0)) + 1
         if len(self.unknown_tags) > MAX_UNKNOWN_TAGS:
             oldest = min(

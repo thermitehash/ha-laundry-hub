@@ -17,7 +17,7 @@ from pytest_homeassistant_custom_component.common import CLIENT_ID, MockConfigEn
 
 from custom_components.laundry_hub.access import Policy
 from custom_components.laundry_hub.config_flow import seed_subentries
-from custom_components.laundry_hub.const import DOMAIN, STORAGE_KEY, TAP_EVENT
+from custom_components.laundry_hub.const import DOMAIN, STORAGE_KEY, TAP_EVENT, VERSION
 from custom_components.laundry_hub.hub import LaundryHub
 
 from .conftest import OPTIONS
@@ -85,7 +85,7 @@ async def test_api_info(hass: HomeAssistant, hass_ws_client, member) -> None:
     hub = await setup(hass, app_access="household", ai_task_entity="ai_task.x")
     admin, kid = await clients(hass, hass_ws_client, member)
     info = (await admin("api_info"))["result"]
-    assert info["api_version"] == 1 and info["integration_version"] == "0.2.3"
+    assert info["api_version"] == 1 and info["integration_version"] == VERSION
     assert info["wardrobe_enabled"] is True and info["role"] == "admin"
     assert {"phone_tap", "url_import", "ai_describe", "changes", "if_rev"} <= set(
         info["capabilities"]
@@ -305,6 +305,7 @@ def payloads(hub: LaundryHub, gid: str) -> dict[str, dict[str, Any]]:
         "purchases/restore": {"card_id": "c"},
         "purchases/uniform": {"store_key": "blauer"},
         "purchases/check": {},
+        "purchases/retry_unreadable": {},
     }
 
 
@@ -326,11 +327,12 @@ async def test_every_command_declares_a_policy(hass: HomeAssistant) -> None:
     member_ok = {
         name for name, h in commands.items() if h.laundry_policy is not Policy.ADMIN
     }
+    # v0.2.4: members may enrol (garment/create); describe_fields and
+    # reset_field became admin-only (Heather's answer).
     assert member_ok == {
         "data", "api_info", "changes", "subscribe", "photo/url", "tap",
-        "garment/update", "garment/wardrobe", "garment/describe_fields",
-        "garment/reset_field", "photo/upload", "photo/delete", "photo/remove",
-        "photo/reorder",
+        "garment/create", "garment/update", "garment/wardrobe",
+        "photo/upload", "photo/delete", "photo/remove", "photo/reorder",
     }  # fmt: skip
 
 
@@ -449,7 +451,10 @@ async def test_phone_tap_unknown_and_known(
     msg = await kid(
         "tap", uid="99:aa:bb:cc", source="phone", device_name="Alex's iPhone"
     )
-    assert msg["result"] == {"known": False, "uid": "99AABBCC", "rev": hub.revs.rev}
+    # v0.2.4 adds can_enroll / owner (additive).
+    assert {"known": False, "uid": "99AABBCC", "rev": hub.revs.rev}.items() <= msg[
+        "result"
+    ].items()
     assert hub.catalog.unknown_tags["99AABBCC"]["station"] == "phone:Alex's iPhone"
     seen = [(await admin.raw.receive_json())["event"] for _ in range(2)]
     tap = next(e["tap"] for e in seen if "tap" in e)
