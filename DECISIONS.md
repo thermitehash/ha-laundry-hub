@@ -23,6 +23,7 @@ Choices made while building v0.2.4 without asking. Each line: decision, then rea
 15. **If `generate_data` raises, it's retried once with a minimal structure** (is_order, store, order_ref, items[name, image_url]). Only if that fails too does the failure count.
 16. **Failure logs include the exception message**, with email addresses replaced by `<address>` and cut to 300 characters. The email body is never logged. The Anthropic provider's own "Failed to parse JSON response" log, which includes the reply, is outside Laundry Hub.
 17. **A shipping notice with no items for an unseen order isn't an error:** it's read, makes no card and is marked seen. Recording it against the order when the confirmation arrives isn't built; the confirmation creates the cards anyway.
+18. **Heather's answers to the v0.2.4 open questions (no code change):** the 30-minute enrolment window stays fixed, not configurable. Members enrol one tag at a time, the latest they tapped, with no batch of several tags tapped in a row. Admins aren't notified when a member enrols a garment.
 
 # Decisions (v0.2.3)
 
